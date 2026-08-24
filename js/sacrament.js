@@ -3,7 +3,7 @@
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
 import { db } from "./firebase-init.js";
-import { hasRole } from "./app.js";
+import { ctx, hasRole } from "./app.js";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -20,6 +20,7 @@ const MEETING_TYPES = [
   ["fast", "Fast & Testimony Meeting"],
   ["conference", "General Conference"],
   ["stakeconf", "Stake Conference"],
+  ["wardconf", "Ward Conference"],
   ["primary", "Primary Program"],
   ["christmas", "Christmas Program"],
   ["easter", "Easter Program"],
@@ -51,8 +52,8 @@ const HYMN_KINDS = ["openingHymn", "sacramentHymn", "intermediateHymn", "closing
 // compact labels for the table's Type column
 const SHORT_TYPE = {
   sacrament: "—", fast: "Fast & Testimony", conference: "Gen. Conference",
-  stakeconf: "Stake Conf.", primary: "Primary Prog.", christmas: "Christmas",
-  easter: "Easter", other: "Other",
+  stakeconf: "Stake Conf.", wardconf: "Ward Conf.", primary: "Primary Prog.",
+  christmas: "Christmas", easter: "Easter", other: "Other",
 };
 // types with no ward sacrament meeting at all
 const NO_MEETING = (t) => t === "conference" || t === "stakeconf";
@@ -87,9 +88,9 @@ function defaultItems(type) {
 function blankItem(kind, time = 5) {
   const it = { kind, time };
   if (HYMN_KINDS.includes(kind)) Object.assign(it, { num: "", title: "" });
-  else if (SPEAKER_KINDS.includes(kind)) Object.assign(it, { name: "", topic: "" });
-  else if (PRAYER_KINDS.includes(kind)) Object.assign(it, { name: "", org: "" });
-  else if (kind === "musical") Object.assign(it, { who: "", hymn: "", accompanist: "" });
+  else if (SPEAKER_KINDS.includes(kind)) Object.assign(it, { name: "", topic: "", confirmed: false, confirmedBy: "" });
+  else if (PRAYER_KINDS.includes(kind)) Object.assign(it, { name: "", org: "", confirmed: false, confirmedBy: "" });
+  else if (kind === "musical") Object.assign(it, { who: "", hymn: "", accompanist: "", confirmed: false, confirmedBy: "" });
   else if (kind === "blessing") Object.assign(it, { priest1: "", priest2: "" });
   else if (kind === "babyBlessing") Object.assign(it, { name: "" });
   else if (kind === "wardBusiness") Object.assign(it, { sustainings: [], releasings: [], other: "" });
@@ -245,6 +246,23 @@ function sundaysOfYear(year, fromISO) {
   return out;
 }
 
+// small Ward Business pill for the table's Conducting cell: grey when empty,
+// colored + summarized when there's content; click opens the quick editor.
+function wbPillHtml(m, date, canEdit) {
+  const items = itemsFor(m, date).filter((i) => i.kind === "wardBusiness");
+  const susCount = items.reduce((a, b) => a + (b.sustainings?.length || 0), 0);
+  const relCount = items.reduce((a, b) => a + (b.releasings?.length || 0), 0);
+  const other = items.some((b) => (b.other || "").trim());
+  const has = susCount || relCount || other;
+  const parts = [];
+  if (susCount) parts.push(`${susCount} sus`);
+  if (relCount) parts.push(`${relCount} rel`);
+  if (other) parts.push("other");
+  const cls = has ? "wb-pill wb-has" : "wb-pill";
+  const clickAttr = canEdit ? ` data-date="${date}" data-qe='{"t":"wb"}'` : "";
+  return `<span class="${cls}${canEdit ? " st-click" : ""}"${clickAttr} title="Ward Business">${has ? "📋 " + parts.join(" · ") : "Ward Business"}</span>`;
+}
+
 function typeLabel(m, date) {
   const t = m?.type || defaultTypeFor(date);
   if (t === "other" && m?.customType) return m.customType;
@@ -263,40 +281,54 @@ function statusChips(m, date) {
   const planned = !!m;
   const can = hasRole("bishopric");
   const of = (k) => items.filter((i) => i.kind === k);
-  // ok + name -> green pill that expands to show the person;
+  // no name -> grey/red (unassigned); name but not confirmed -> yellow "pending";
+  // name + confirmed -> green with a checkmark and a "confirmed by" tooltip.
   // qe -> pill is clickable for quick inline assignment
-  const chip = (label, ok, name, qe) => {
-    const cls = ok ? "st-ok" : planned ? "st-miss" : "st-off";
+  const chip = (label, name, qe, confirmed, confirmedBy) => {
+    const hasName = !!name;
+    const cls = !hasName ? (planned ? "st-miss" : "st-off") : confirmed ? "st-ok" : "st-pending";
     const clickable = qe && can;
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}' title="Click to assign"` : ""}>${ok ? "✓" : "○"} ${label}${ok && name ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
+    const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
+    const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}>${icon} ${label}${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
   };
 
-  const hymns = items.filter((i) => HYMN_KINDS.includes(i.kind));
-  const hymnsFilled = hymns.filter((h) => h.num || h.title).length;
+  // Hymns pill covers 4 slots: opening/sacrament/closing hymns, plus the
+  // intermediate slot whether it's currently a hymn or a special musical number.
+  const coreHymns = items.filter((i) => i.kind !== "intermediateHymn" && HYMN_KINDS.includes(i.kind));
+  const coreFilled = coreHymns.filter((h) => h.num || h.title).length;
+  const interItem = items.find((i) => i.kind === "intermediateHymn") || items.find((i) => i.kind === "musical");
+  const interFilled = interItem ? (interItem.kind === "musical" ? !!interItem.who : !!(interItem.num || interItem.title)) : false;
+  const hymnsTotal = coreHymns.length + (interItem ? 1 : 0);
+  const hymnsFilled = coreFilled + (interFilled ? 1 : 0);
   const inv = of("invocation")[0];
   const ben = of("benediction")[0];
-
-  const chips = [
-    chip("Conducting", !!m?.conducting, m?.conducting, { t: "c" }),
-    chip("Open Prayer", !!inv?.name, inv?.name, { t: "i", k: "invocation", o: 0 }),
-    chip("Close Prayer", !!ben?.name, ben?.name, { t: "i", k: "benediction", o: 0 }),
-    chip(`Hymns ${hymnsFilled}/${hymns.length}`, hymns.length > 0 && hymnsFilled === hymns.length, null, { t: "h" }),
-  ];
 
   // Ward Business: grey when none entered; green + clickable when there is some
   const wb = of("wardBusiness");
   const susCount = wb.reduce((a, b) => a + (b.sustainings?.length || 0), 0);
   const relCount = wb.reduce((a, b) => a + (b.releasings?.length || 0), 0);
   const wbOther = wb.some((b) => (b.other || "").trim());
+  let wbChip;
   if (susCount || relCount || wbOther) {
     const parts = [];
     if (susCount) parts.push(`${susCount} sustain`);
     if (relCount) parts.push(`${relCount} release`);
     if (wbOther) parts.push("other");
-    chips.push(`<span class="st st-ok st-click" data-wb="${date}" title="Click to view">✓ Ward Business<span class="st-name">${parts.join(" · ")}</span></span>`);
+    // bishopric gets the editable form; members get a read-only view of the same content
+    const clickAttr = can ? `data-qe='{"t":"wb"}' title="Click to view or edit"` : `data-wb="${date}" title="Click to view"`;
+    wbChip = `<span class="st st-ok st-click" ${clickAttr}>✓ Ward Business<span class="st-name">${parts.join(" · ")}</span></span>`;
   } else {
-    chips.push(`<span class="st st-off">○ Ward Business</span>`);
+    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}>○ Ward Business</span>`;
   }
+
+  const chips = [
+    chip("Conducting", m?.conducting, { t: "c" }, m?.conductingConfirmed, m?.conductingConfirmedBy),
+    wbChip,
+    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy),
+    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy),
+    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}>${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"} Hymns ${hymnsFilled}/${hymnsTotal}</span>`,
+  ];
 
   // one pill per speaker slot, regular speakers numbered
   const regTotal = of("speaker").length;
@@ -308,13 +340,8 @@ function statusChips(m, date) {
     occ[it.kind] = o + 1;
     let label = KINDS[it.kind].label;
     if (it.kind === "speaker") { sNum++; if (regTotal > 1) label = `Speaker ${sNum}`; }
-    chips.push(chip(label, !!it.name, it.name, { t: "i", k: it.kind, o }));
+    chips.push(chip(label, it.name, { t: "i", k: it.kind, o }, it.confirmed, it.confirmedBy));
   });
-
-  // musical number: grey when not on the agenda, red when unassigned, green + name when set
-  const mus = of("musical");
-  if (mus.length) mus.forEach((x, o) => chips.push(chip("Musical #", !!x.who, x.who, { t: "i", k: "musical", o })));
-  else chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"i","k":"musical","o":0}' title="Click to assign"` : ""}>○ Musical #</span>`);
 
   return `<div class="st-row">${chips.join("")}</div>`;
 }
@@ -352,17 +379,21 @@ function renderCards(wrap) {
     const total = planned ? (m.items || []).reduce((s, i) => s + (Number(i.time) || 0), 0) : 0;
     const babies = planned ? (m.items || []).filter((i) => i.kind === "babyBlessing") : [];
     return `
-    <div class="card clickable ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
+    <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
         <div>
           <h3 style="margin:0">${fmtDate(date, { year: true })}
-            ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-inprogress" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
+            ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
             ${babies.map((b) => `<span class="pill pill-baby" style="vertical-align:middle">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join(" ")}
           </h3>
           <div class="row-sub">${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span> ` : ""}${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</div>
         </div>
-        ${canEdit ? `<button class="btn btn-sm" data-edit="${date}">${planned ? "Edit" : "Plan"}</button>` : ""}
+        <div style="display:flex;gap:.4rem">
+          ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}
+          ${canEdit && !isConf ? `<button class="btn btn-sm" data-addbaby="${date}">+ Baby</button>` : ""}
+          ${canEdit ? `<button class="btn btn-sm" data-edit="${date}">${planned ? "Edit" : "Plan"}</button>` : ""}
+        </div>
       </div>
       ${statusChips(m, date)}
     </div>`;
@@ -370,15 +401,39 @@ function renderCards(wrap) {
 
   wrap.querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); editMeeting(b.dataset.edit); }));
+  wrap.querySelectorAll("[data-view]").forEach((b) =>
+    b.addEventListener("click", (e) => { e.stopPropagation(); viewMeeting(b.dataset.view); }));
   wrap.querySelectorAll("[data-wb]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); wbModal(el.dataset.wb); }));
+  wrap.querySelectorAll("[data-addbaby]").forEach((b) =>
+    b.addEventListener("click", (e) => { e.stopPropagation(); quickAddBaby(b.dataset.addbaby); }));
   wrap.querySelectorAll("[data-qe]").forEach((el) =>
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       quickEdit(el.closest("[data-date]").dataset.date, JSON.parse(el.dataset.qe));
     }));
-  wrap.querySelectorAll(".card.clickable").forEach((card) =>
-    card.addEventListener("click", () => viewMeeting(card.dataset.date)));
+}
+
+// quick "+ Baby" button: always adds a NEW baby blessing item (a Sunday can have more than one)
+function quickAddBaby(date) {
+  const el = openModal(`
+    <h3>Add Baby Blessing <span class="row-sub">· ${fmtDate(date, { year: true })}</span></h3>
+    <label class="field">Baby's name <input id="qe-baby-name" placeholder="Baby's name"></label>
+    <div class="modal-actions">
+      <div class="right">
+        <button class="btn" id="qe-cancel">Cancel</button>
+        <button class="btn btn-primary" id="qe-save">Add</button>
+      </div>
+    </div>`);
+  el.querySelector("#qe-cancel").addEventListener("click", closeModal);
+  el.querySelector("#qe-save").addEventListener("click", async () => {
+    const name = el.querySelector("#qe-baby-name").value.trim();
+    await patchMeeting(date, (m) => {
+      insertCanonical(m.items, { kind: "babyBlessing", time: 3, name });
+    });
+    closeModal();
+  });
+  el.querySelector("input").focus();
 }
 
 // find the o-th item of a kind
@@ -402,22 +457,39 @@ function quickEdit(date, q) {
 
   let html = "", onSave = null;
 
+  const confirmField = (checked, byLine) => `
+    <label class="field confirm-field" style="margin-top:.9rem">
+      <span><input type="checkbox" id="qe-confirmed" ${checked ? "checked" : ""}> Confirmed</span>
+      ${byLine ? `<span class="row-sub confirm-by">${esc(byLine)}</span>` : ""}
+    </label>`;
+
   if (q.t === "c") {
     html = `<h3>Conducting ${dateLabel}</h3>
-      <label class="field">Conducting ${personSelect("qe-cond", cur?.conducting || "")}</label>`;
+      <label class="field">Conducting ${personSelect("qe-cond", cur?.conducting || "")}</label>
+      ${confirmField(cur?.conductingConfirmed, cur?.conductingConfirmed && cur?.conductingConfirmedBy ? `Confirmed by ${cur.conductingConfirmedBy}` : "")}`;
     onSave = (el) => {
       const val = readPersonSelect(el, "qe-cond");
-      return (m) => { m.conducting = val; };
+      const nowConfirmed = el.querySelector("#qe-confirmed").checked;
+      return (m) => {
+        m.conducting = val;
+        m.conductingConfirmed = nowConfirmed;
+        m.conductingConfirmedBy = nowConfirmed ? (cur?.conductingConfirmed ? cur.conductingConfirmedBy : ctx.name) : "";
+      };
     };
   } else if (q.t === "h") {
     const hymnRows = [];
     const occ = {};
     items.forEach((it) => {
-      if (!HYMN_KINDS.includes(it.kind)) return;
+      if (!HYMN_KINDS.includes(it.kind) || it.kind === "intermediateHymn") return;
       const o = occ[it.kind] ?? 0;
       occ[it.kind] = o + 1;
       hymnRows.push({ kind: it.kind, o, num: it.num || "", title: it.title || "" });
     });
+    // the intermediate slot can hold either a hymn or a special musical number
+    const interHymn = items.find((i) => i.kind === "intermediateHymn");
+    const interMusical = items.find((i) => i.kind === "musical");
+    const interIsMusical = !!interMusical;
+
     html = `<h3>Hymns ${dateLabel}</h3>
       ${hymnRows.map((h, i) => `
         <label class="field" style="margin-bottom:.6rem">${KINDS[h.kind].label}
@@ -425,50 +497,143 @@ function quickEdit(date, q) {
             <input id="qe-num-${i}" placeholder="#" inputmode="numeric" style="width:4.5rem" value="${esc(h.num)}">
             <input id="qe-title-${i}" placeholder="Hymn title" style="flex:1" value="${esc(h.title)}">
           </div>
-        </label>`).join("")}`;
+        </label>`).join("")}
+      <div class="field" style="margin-bottom:.4rem">
+        <span>Intermediate</span>
+        <div class="chips" style="margin:.3rem 0 .5rem">
+          <button class="chip ${!interIsMusical ? "active" : ""}" id="qe-inter-hymn-btn" type="button">Hymn</button>
+          <button class="chip ${interIsMusical ? "active" : ""}" id="qe-inter-musical-btn" type="button">Special Musical #</button>
+        </div>
+        <div id="qe-inter-hymn-fields" style="display:${interIsMusical ? "none" : "flex"};gap:.4rem">
+          <input id="qe-inter-num" placeholder="#" inputmode="numeric" style="width:4.5rem" value="${esc(interHymn?.num || "")}">
+          <input id="qe-inter-title" placeholder="Hymn title" style="flex:1" value="${esc(interHymn?.title || "")}">
+        </div>
+        <div id="qe-inter-musical-fields" style="display:${interIsMusical ? "block" : "none"}">
+          <input id="qe-inter-who" placeholder="Performer(s)" style="width:100%;margin-bottom:.4rem" value="${esc(interMusical?.who || "")}">
+          <input id="qe-inter-piece" placeholder="Hymn / piece" style="width:100%;margin-bottom:.4rem" value="${esc(interMusical?.hymn || "")}">
+          <input id="qe-inter-acc" placeholder="Accompanist" style="width:100%" value="${esc(interMusical?.accompanist || "")}">
+        </div>
+      </div>`;
+
     onSave = (el) => {
       const vals = hymnRows.map((h, i) => ({
         kind: h.kind, o: h.o,
         num: el.querySelector(`#qe-num-${i}`).value.trim(),
         title: el.querySelector(`#qe-title-${i}`).value.trim(),
       }));
-      return (m) => vals.forEach((v) => {
-        let it = nthItem(m.items, v.kind, v.o);
-        if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
-        it.num = v.num; it.title = v.title;
-      });
+      const nowMusical = el.querySelector("#qe-inter-musical-fields").style.display !== "none";
+      const interVal = nowMusical
+        ? { who: el.querySelector("#qe-inter-who").value.trim(), hymn: el.querySelector("#qe-inter-piece").value.trim(), accompanist: el.querySelector("#qe-inter-acc").value.trim() }
+        : { num: el.querySelector("#qe-inter-num").value.trim(), title: el.querySelector("#qe-inter-title").value.trim() };
+      return (m) => {
+        vals.forEach((v) => {
+          let it = nthItem(m.items, v.kind, v.o);
+          if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
+          it.num = v.num; it.title = v.title;
+        });
+        // swap the intermediate slot between an intermediateHymn item and a musical item
+        const idxIH = m.items.findIndex((i) => i.kind === "intermediateHymn");
+        const idxMus = m.items.findIndex((i) => i.kind === "musical");
+        if (nowMusical) {
+          if (idxMus >= 0) Object.assign(m.items[idxMus], interVal);
+          else if (idxIH >= 0) m.items[idxIH] = { kind: "musical", time: m.items[idxIH].time, confirmed: false, confirmedBy: "", ...interVal };
+          else insertCanonical(m.items, { kind: "musical", time: 3, confirmed: false, confirmedBy: "", ...interVal });
+        } else {
+          if (idxIH >= 0) Object.assign(m.items[idxIH], interVal);
+          else if (idxMus >= 0) m.items[idxMus] = { kind: "intermediateHymn", time: m.items[idxMus].time, ...interVal };
+          else insertCanonical(m.items, { kind: "intermediateHymn", time: 3, ...interVal });
+        }
+      };
+    };
+  } else if (q.t === "wb") {
+    const wbIt = items.find((i) => i.kind === "wardBusiness") || blankItem("wardBusiness");
+    const wbState = {
+      sustainings: (wbIt.sustainings || []).map((s) => ({ ...s })),
+      releasings: (wbIt.releasings || []).map((s) => ({ ...s })),
+      other: wbIt.other || "",
+    };
+    const rowsHtml = (list, prefix) => list.map((s, r) => `
+      <div class="speaker-row">
+        <input class="wb-name" data-list="${prefix}" data-row="${r}" placeholder="Name" value="${esc(s.name || "")}">
+        <input class="wb-calling" data-list="${prefix}" data-row="${r}" placeholder="Calling" value="${esc(s.calling || "")}">
+        <button class="btn btn-sm" data-wbdel="${prefix}" data-row="${r}" type="button">✕</button>
+      </div>`).join("");
+    html = `<h3>Ward Business ${dateLabel}</h3>
+      <div class="row-sub" style="margin:.2rem 0">Sustainings <button class="btn btn-sm" id="qe-wb-addsus" type="button">+ Add</button></div>
+      <div id="qe-wb-sus">${rowsHtml(wbState.sustainings, "sus")}</div>
+      <div class="row-sub" style="margin:.8rem 0 .2rem">Releasings <button class="btn btn-sm" id="qe-wb-addrel" type="button">+ Add</button></div>
+      <div id="qe-wb-rel">${rowsHtml(wbState.releasings, "rel")}</div>
+      <label class="field" style="margin-top:.8rem">Other business
+        <textarea id="qe-wb-other" rows="2">${esc(wbState.other)}</textarea>
+      </label>`;
+    onSave = (el) => {
+      const readList = (prefix) => [...el.querySelectorAll(`.wb-name[data-list="${prefix}"]`)].map((inp) => {
+        const r = inp.dataset.row;
+        const calling = el.querySelector(`.wb-calling[data-list="${prefix}"][data-row="${r}"]`)?.value.trim() || "";
+        return { name: inp.value.trim(), calling };
+      }).filter((s) => s.name || s.calling);
+      const sustainings = readList("sus");
+      const releasings = readList("rel");
+      const other = el.querySelector("#qe-wb-other").value.trim();
+      return (m) => {
+        let t = m.items.find((i) => i.kind === "wardBusiness");
+        if (!t) { t = blankItem("wardBusiness"); insertCanonical(m.items, t); }
+        t.sustainings = sustainings; t.releasings = releasings; t.other = other;
+      };
     };
   } else {
     const it = nthItem(items, q.k, q.o) || blankItem(q.k);
     const label = KINDS[q.k]?.label || q.k;
+    const byLine = it.confirmed && it.confirmedBy ? `Confirmed by ${it.confirmedBy}` : "";
     if (PRAYER_KINDS.includes(q.k)) {
       html = `<h3>${label} ${dateLabel}</h3>
         <label class="field">Name <input id="qe-name" value="${esc(it.name || "")}"></label>
-        <label class="field" style="margin-top:.6rem">Arranged by ${orgSel("qe-org", it.org || "")}</label>`;
+        <label class="field" style="margin-top:.6rem">Arranged by ${orgSel("qe-org", it.org || "")}</label>
+        ${confirmField(it.confirmed, byLine)}`;
       onSave = (el) => {
         const name = el.querySelector("#qe-name").value.trim();
         const org = el.querySelector("#qe-org").value;
-        return (m) => { const t = ensureQE(m, q); t.name = name; t.org = org; };
+        const nowConfirmed = el.querySelector("#qe-confirmed").checked;
+        return (m) => {
+          const t = ensureQE(m, q);
+          t.name = name; t.org = org;
+          t.confirmed = nowConfirmed;
+          t.confirmedBy = nowConfirmed ? (it.confirmed ? it.confirmedBy : ctx.name) : "";
+        };
       };
     } else if (SPEAKER_KINDS.includes(q.k)) {
       html = `<h3>${label} ${dateLabel}</h3>
         <label class="field">Name <input id="qe-name" value="${esc(it.name || "")}"></label>
-        <label class="field" style="margin-top:.6rem">Topic (optional) <input id="qe-topic" value="${esc(it.topic || "")}"></label>`;
+        <label class="field" style="margin-top:.6rem">Topic (optional) <input id="qe-topic" value="${esc(it.topic || "")}"></label>
+        ${confirmField(it.confirmed, byLine)}`;
       onSave = (el) => {
         const name = el.querySelector("#qe-name").value.trim();
         const topic = el.querySelector("#qe-topic").value.trim();
-        return (m) => { const t = ensureQE(m, q); t.name = name; t.topic = topic; };
+        const nowConfirmed = el.querySelector("#qe-confirmed").checked;
+        return (m) => {
+          const t = ensureQE(m, q);
+          t.name = name; t.topic = topic;
+          t.confirmed = nowConfirmed;
+          t.confirmedBy = nowConfirmed ? (it.confirmed ? it.confirmedBy : ctx.name) : "";
+        };
       };
     } else if (q.k === "musical") {
       html = `<h3>${label} ${dateLabel}</h3>
         <label class="field">Who (person/group) <input id="qe-who" value="${esc(it.who || "")}"></label>
         <label class="field" style="margin-top:.6rem">Hymn / piece <input id="qe-hymn" value="${esc(it.hymn || "")}"></label>
-        <label class="field" style="margin-top:.6rem">Accompanist <input id="qe-acc" value="${esc(it.accompanist || "")}"></label>`;
+        <label class="field" style="margin-top:.6rem">Accompanist <input id="qe-acc" value="${esc(it.accompanist || "")}"></label>
+        ${confirmField(it.confirmed, byLine)}`;
       onSave = (el) => {
         const who = el.querySelector("#qe-who").value.trim();
         const hymn = el.querySelector("#qe-hymn").value.trim();
         const acc = el.querySelector("#qe-acc").value.trim();
-        return (m) => { const t = ensureQE(m, q); t.who = who; t.hymn = hymn; t.accompanist = acc; };
+        const nowConfirmed = el.querySelector("#qe-confirmed").checked;
+        return (m) => {
+          const t = ensureQE(m, q);
+          t.who = who; t.hymn = hymn; t.accompanist = acc;
+          t.confirmed = nowConfirmed;
+          t.confirmedBy = nowConfirmed ? (it.confirmed ? it.confirmedBy : ctx.name) : "";
+        };
       };
     } else return;
   }
@@ -480,6 +645,37 @@ function quickEdit(date, q) {
         <button class="btn btn-primary" id="qe-save">Save</button>
       </div>
     </div>`);
+
+  // ward-business row add/remove (event delegation so we don't have to re-bind on every change)
+  el.addEventListener("click", (e) => {
+    if (e.target.id === "qe-wb-addsus" || e.target.id === "qe-wb-addrel") {
+      const prefix = e.target.id === "qe-wb-addsus" ? "sus" : "rel";
+      const wrap = el.querySelector(prefix === "sus" ? "#qe-wb-sus" : "#qe-wb-rel");
+      const r = wrap.children.length;
+      wrap.insertAdjacentHTML("beforeend", `
+        <div class="speaker-row">
+          <input class="wb-name" data-list="${prefix}" data-row="${r}" placeholder="Name">
+          <input class="wb-calling" data-list="${prefix}" data-row="${r}" placeholder="Calling">
+          <button class="btn btn-sm" data-wbdel="${prefix}" data-row="${r}" type="button">✕</button>
+        </div>`);
+    }
+    if (e.target.dataset.wbdel) e.target.closest(".speaker-row").remove();
+  });
+
+  // intermediate slot: Hymn / Special Musical # toggle
+  el.querySelector("#qe-inter-hymn-btn")?.addEventListener("click", (e) => {
+    el.querySelector("#qe-inter-hymn-fields").style.display = "flex";
+    el.querySelector("#qe-inter-musical-fields").style.display = "none";
+    e.target.classList.add("active");
+    el.querySelector("#qe-inter-musical-btn").classList.remove("active");
+  });
+  el.querySelector("#qe-inter-musical-btn")?.addEventListener("click", (e) => {
+    el.querySelector("#qe-inter-hymn-fields").style.display = "none";
+    el.querySelector("#qe-inter-musical-fields").style.display = "block";
+    e.target.classList.add("active");
+    el.querySelector("#qe-inter-hymn-btn").classList.remove("active");
+  });
+
   el.querySelector("#qe-cancel").addEventListener("click", closeModal);
   el.querySelector("#qe-save").addEventListener("click", async () => {
     const mutate = onSave(el);
@@ -666,22 +862,23 @@ function renderTable(wrap) {
         <b>${shortDate}</b>
         ${nth === 5 ? `<div><span class="nth-pill nth-5">5th</span></div>` : ""}
       </td>
-      <td>
+      <td class="cell-type${type !== "sacrament" ? " has-type" : ""}">
         <select class="cell-sel" data-date="${date}" data-cell="type" ${dis}>
           ${MEETING_TYPES.map(([k]) => `<option value="${k}" ${type === k ? "selected" : ""}>${SHORT_TYPE[k] || k}</option>`).join("")}
         </select>
         ${isConf ? "" : `<input class="cell-in cell-theme" data-date="${date}" data-cell="theme" value="${esc(m?.theme || "")}" placeholder="theme" ${dis}>`}
       </td>
-      <td>${isConf ? "" : `
+      <td class="cell-conducting">${isConf ? "" : `
         <select class="cell-sel" data-date="${date}" data-cell="conducting" ${dis}>
           <option value="">—</option>
           ${bishopric.map((n) => `<option value="${esc(n)}" ${m?.conducting === n ? "selected" : ""}>${esc(n)}</option>`).join("")}
           ${m?.conducting && !bishopric.includes(m.conducting) ? `<option value="${esc(m.conducting)}" selected>${esc(m.conducting)}</option>` : ""}
-        </select>`}
+        </select>
+        ${wbPillHtml(m, date, canEdit)}`}
       </td>
       <td>${isConf ? "" : `
-        <input class="cell-in" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="conductor" ${dis}>
-        <input class="cell-in" data-date="${date}" data-cell="organist" value="${esc(m?.organist || "")}" placeholder="organist" ${dis}>`}
+        <label class="cell-label">Cond.<input class="cell-in" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="—" ${dis}></label>
+        <label class="cell-label">Org.<input class="cell-in" data-date="${date}" data-cell="organist" value="${esc(m?.organist || "")}" placeholder="—" ${dis}></label>`}
       </td>
       ${hymnCell("openingHymn")}
       ${prayerCell("invocation")}
@@ -720,6 +917,11 @@ function renderTable(wrap) {
     td.addEventListener("click", () => viewMeeting(td.dataset.view)));
   wrap.querySelectorAll("[data-editspk]").forEach((td) =>
     td.addEventListener("click", () => editMeeting(td.dataset.editspk)));
+  wrap.querySelectorAll(".wb-pill[data-qe]").forEach((el) =>
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      quickEdit(el.dataset.date, JSON.parse(el.dataset.qe));
+    }));
 
   if (!canEdit) return;
   wrap.querySelectorAll(".cell-in, .cell-sel").forEach((el) =>

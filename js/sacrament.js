@@ -2,12 +2,12 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787553291";
-import { ctx, hasRole } from "./app.js?v=1787553291";
+import { db } from "./firebase-init.js?v=1787578833";
+import { ctx, hasRole } from "./app.js?v=1787578833";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787553291";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787578833";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -324,7 +324,8 @@ function statusChips(m, date) {
     const clickable = qe && can;
     const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
     const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-icon">${icon}</span> <span class="st-label">${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${org ? `<span class="st-org">${esc(org)}</span>` : ""}</span>`;
+    const orgBadge = org ? `<span class="st-org org-${org.toLowerCase().replace(/[^a-z]+/g, "-")}">${esc(org)}</span>` : "";
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${orgBadge}</span>`;
   };
 
   // Hymns pill covers 4 slots: opening/sacrament/closing hymns, plus the
@@ -355,9 +356,9 @@ function statusChips(m, date) {
     if (wbOther) parts.push("other");
     // bishopric gets the editable form; members get a read-only view of the same content
     const clickAttr = can ? `data-qe='{"t":"wb"}' title="Click to view or edit"` : `data-wb="${date}" title="Click to view"`;
-    wbChip = `<span class="st st-ok st-click" ${clickAttr}><span class="st-icon">✓</span> <span class="st-label">Ward Business</span><span class="st-name">${parts.join(" · ")}</span></span>`;
+    wbChip = `<span class="st st-ok st-click" ${clickAttr}><span class="st-head"><span class="st-icon">✓</span> Ward Business</span><span class="st-name">${parts.join(" · ")}</span></span>`;
   } else {
-    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}><span class="st-icon">○</span> <span class="st-label">Ward Business</span></span>`;
+    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Ward Business</span></span>`;
   }
 
   const chips = [
@@ -365,7 +366,7 @@ function statusChips(m, date) {
     wbChip,
     chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org),
     chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org),
-    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> <span class="st-label">Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
+    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
   // one pill per speaker slot, regular speakers numbered
@@ -426,7 +427,7 @@ function renderCards(wrap) {
     const hasChoir = planned ? (m.items || []).some((i) => i.kind === "choir") : false;
     const announceText = planned ? (m.items || []).find((i) => i.kind === "announcements")?.text || "" : "";
     const megaphone = canEdit && !isConf ? `
-      <button class="megaphone-btn${announceText ? " has-announce" : ""}" data-qe='{"t":"announce"}' title="${announceText ? "Announcements: " + esc(announceText).slice(0, 80) : "Add announcements"}">
+      <button class="megaphone-btn${announceText ? " has-announce" : ""}" data-qe='{"t":"announce"}' title="${announceText ? esc(announceText.split("\n").filter(Boolean).map((l) => "• " + l).join("\n").slice(0, 160)) : "Add announcements"}">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M11 5 6 9H3v6h3l5 4V5z"/>
           <path d="M15.5 8.5a4 4 0 0 1 0 7"/>
@@ -620,13 +621,21 @@ function quickEdit(date, q) {
       };
     };
   } else if (q.t === "announce") {
+    // one input row per announcement; stored as newline-separated text
     const annIt = items.find((i) => i.kind === "announcements") || blankItem("announcements");
+    const lines = (annIt.text || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    if (!lines.length) lines.push("");
+    const rowHtml = (val) => `
+      <div class="speaker-row">
+        <span class="ann-dot">•</span>
+        <input class="ann-line" autocomplete="off" placeholder="Announcement" value="${esc(val)}">
+        <button class="btn btn-sm ann-del" type="button">✕</button>
+      </div>`;
     html = `<h3>Announcements ${dateLabel}</h3>
-      <label class="field">
-        <textarea id="qe-announce-text" rows="4" placeholder="Announcements for this Sunday">${esc(annIt.text || "")}</textarea>
-      </label>`;
+      <div id="qe-ann-rows">${lines.map(rowHtml).join("")}</div>
+      <button class="btn btn-sm" id="qe-ann-add" type="button">+ Add announcement</button>`;
     onSave = (el) => {
-      const text = el.querySelector("#qe-announce-text").value.trim();
+      const text = [...el.querySelectorAll(".ann-line")].map((i) => i.value.trim()).filter(Boolean).join("\n");
       return (m) => {
         let it = m.items.find((i) => i.kind === "announcements");
         if (!it) { it = blankItem("announcements"); insertCanonical(m.items, it); }
@@ -748,6 +757,17 @@ function quickEdit(date, q) {
         </div>`);
     }
     if (e.target.dataset.wbdel) e.target.closest(".speaker-row").remove();
+    // announcements rows
+    if (e.target.id === "qe-ann-add") {
+      el.querySelector("#qe-ann-rows").insertAdjacentHTML("beforeend", `
+        <div class="speaker-row">
+          <span class="ann-dot">•</span>
+          <input class="ann-line" autocomplete="off" placeholder="Announcement">
+          <button class="btn btn-sm ann-del" type="button">✕</button>
+        </div>`);
+      el.querySelector("#qe-ann-rows .speaker-row:last-child .ann-line")?.focus();
+    }
+    if (e.target.classList.contains("ann-del")) e.target.closest(".speaker-row").remove();
   });
 
   // intermediate slot: Hymn / Special Musical # / Choir toggle
@@ -859,6 +879,11 @@ function renderAgendaView(m) {
       (it.releasings || []).forEach((r) => parts.push(`Release: ${esc(r.name)}${r.calling ? " — " + esc(r.calling) : ""}`));
       if (it.other) parts.push(esc(it.other));
       val = parts.join("; ");
+    } else if (it.kind === "announcements") {
+      const lines = (it.text || "").split("\n").map((s) => s.trim()).filter(Boolean);
+      val = lines.length
+        ? `<span style="display:inline-block;vertical-align:top">${lines.map((l) => `• ${esc(l)}`).join("<br>")}</span>`
+        : "";
     } else {
       val = esc(it.text || "");
     }
@@ -1328,7 +1353,10 @@ function itemCard(it, i) {
           </div>`).join("")}
         <input class="f-other" placeholder="Other business (optional)" style="width:100%" value="${esc(it.other || "")}">
       </div>`;
-  } else { // announcements, testimonies, sacrament, etc.
+  } else if (it.kind === "announcements") {
+    // textarea, one announcement per line — an <input> would silently strip the newlines
+    body = `<textarea class="f-text" rows="3" placeholder="One announcement per line" style="flex:1">${esc(it.text || "")}</textarea>`;
+  } else { // testimonies, sacrament, etc.
     body = `<input class="f-text" placeholder="Details (optional)" style="flex:1" value="${esc(it.text || "")}">`;
   }
   return `

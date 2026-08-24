@@ -1,10 +1,10 @@
 // People tab (bishop only): approve new sign-ins and assign roles.
-import { db } from "./firebase-init.js?v=1787553291";
-import { ctx } from "./app.js?v=1787553291";
+import { db } from "./firebase-init.js?v=1787578833";
+import { ctx } from "./app.js?v=1787578833";
 import {
   collection, onSnapshot, updateDoc, doc,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { toast, esc } from "./ui.js?v=1787553291";
+import { toast, esc } from "./ui.js?v=1787578833";
 
 const ROLES = [
   ["pending", "Pending (no access)"],

@@ -302,10 +302,11 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st-org {
   display: inline-block;
   margin-top: auto;      /* pin to the bottom of the pill */
-  padding: .08rem .5rem;
+  padding: .1rem .55rem;
   border-radius: 99px;
   font-weight: 700; font-size: .66rem;
   white-space: normal;
+  color: #fff; /* solid badges stay readable on any pill background */
 }
 /* hymn approvals manager */
 .ha-row {
@@ -335,12 +336,12 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   color: inherit; opacity: .8;
   white-space: normal;
 }
-/* one distinct color per organization */
-.org-relief-society { background: #fce4ec; color: #ad1457; }
-.org-elders-quorum  { background: #e3f2fd; color: #1565c0; }
-.org-primary        { background: #fff3e0; color: #e65100; }
-.org-young-men      { background: #e8f5e9; color: #2e7d32; }
-.org-young-women    { background: #f3e5f5; color: #6a1b9a; }
+/* one distinct solid color per organization */
+.org-relief-society { background: #c2185b; }
+.org-elders-quorum  { background: #1565c0; }
+.org-primary        { background: #e65100; }
+.org-young-men      { background: #2e7d32; }
+.org-young-women    { background: #6a1b9a; }
 
 /* Ward Business pill inside the table's Conducting cell */
 .wb-pill {

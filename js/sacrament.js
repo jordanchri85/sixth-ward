@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787582773";
-import { ctx, hasRole } from "./app.js?v=1787582773";
+import { db } from "./firebase-init.js?v=1787583303";
+import { ctx, hasRole } from "./app.js?v=1787583303";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787582773";
-import { HYMNS } from "./hymns.js?v=1787582773";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787583303";
+import { HYMNS } from "./hymns.js?v=1787583303";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -627,9 +627,10 @@ function renderCards(wrap) {
           <path d="M18.5 6a7.5 7.5 0 0 1 0 12"/>
         </svg>
       </button>` : "";
-    const condState = !m?.conducting ? (planned ? "st-miss" : "st-off") : m?.conductingConfirmed ? "st-ok" : "st-pending";
+    // conducting is assigned or not — no confirmation step
+    const condState = m?.conducting ? "st-ok" : planned ? "st-miss" : "st-off";
     const condChip = isConf ? "" : `
-      <span class="cond-inline ${condState}${canEdit ? " st-click" : ""}"${canEdit ? ` data-qe='{"t":"c"}'` : ""}${m?.conductingConfirmed && m?.conductingConfirmedBy ? ` title="Confirmed by ${esc(m.conductingConfirmedBy)}"` : canEdit ? ` title="Click to assign"` : ""}>${m?.conducting ? (m.conductingConfirmed ? "✓" : "●") + " Conducting: " + esc(m.conducting) : "○ Conducting"}</span>`;
+      <span class="cond-inline ${condState}${canEdit ? " st-click" : ""}"${canEdit ? ` data-qe='{"t":"c"}' title="Click to assign"` : ""}>${m?.conducting ? "✓ Conducting: " + esc(m.conducting) : "○ Conducting"}</span>`;
     return `
     <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
@@ -716,17 +717,12 @@ function quickEdit(date, q) {
     </label>`;
 
   if (q.t === "c") {
+    // conducting needs no confirmation step — assigned is assigned
     html = `<h3>Conducting ${dateLabel}</h3>
-      <label class="field">Conducting ${personSelect("qe-cond", cur?.conducting || "")}</label>
-      ${confirmField(cur?.conductingConfirmed, cur?.conductingConfirmed && cur?.conductingConfirmedBy ? `Confirmed by ${cur.conductingConfirmedBy}` : "")}`;
+      <label class="field">Conducting ${personSelect("qe-cond", cur?.conducting || "")}</label>`;
     onSave = (el) => {
       const val = readPersonSelect(el, "qe-cond");
-      const nowConfirmed = el.querySelector("#qe-confirmed").checked;
-      return (m) => {
-        m.conducting = val;
-        m.conductingConfirmed = nowConfirmed;
-        m.conductingConfirmedBy = nowConfirmed ? (cur?.conductingConfirmed ? cur.conductingConfirmedBy : ctx.name) : "";
-      };
+      return (m) => { m.conducting = val; };
     };
   } else if (q.t === "h") {
     // just the three fixed hymns; the intermediate slot has its own pill/editor

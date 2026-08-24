@@ -235,6 +235,30 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 
 .pill-baby { background: #fde7f0; color: #b0407a; }
+.pill-baby-bold {
+  display: inline-block;
+  background: #d6336c; color: #fff;
+  font-weight: 700; font-size: .82rem;
+  padding: .2rem .65rem; border-radius: 99px;
+  vertical-align: middle;
+}
+.megaphone-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; flex: none;
+  border: none; border-radius: 6px; padding: 0;
+  background: #e9ecef; color: #aab1ba;
+  cursor: pointer;
+}
+.megaphone-btn:hover { background: #dfe3e7; }
+.megaphone-btn.has-announce { background: var(--brand-soft); color: var(--brand); }
+.megaphone-btn.has-announce:hover { background: #dbe7f2; }
+.pill-choir-bold {
+  display: inline-block;
+  background: #4c3fa8; color: #fff;
+  font-weight: 700; font-size: .82rem;
+  padding: .2rem .65rem; border-radius: 99px;
+  vertical-align: middle;
+}
 
 /* pills share one row at full width; labels may wrap to two lines */
 .st-row { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .55rem; }
@@ -263,6 +287,12 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-weight: 700; font-size: .8rem;
   color: inherit; /* matches the pill's state color: green when confirmed, amber when pending */
   margin-top: .1rem;
+  white-space: normal;
+}
+.st-org {
+  display: block;
+  font-weight: 500; font-size: .68rem;
+  color: inherit; opacity: .75;
   white-space: normal;
 }
 

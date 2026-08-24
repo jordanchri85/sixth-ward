@@ -2,18 +2,20 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787550913";
-import { ctx, hasRole } from "./app.js?v=1787550913";
+import { db } from "./firebase-init.js?v=1787553291";
+import { ctx, hasRole } from "./app.js?v=1787553291";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787550913";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787553291";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
 const DEFAULT_BISHOPRIC = ["Bishop Christensen", "Brother Bennett", "Brother Beach"];
 let bishopric = [...DEFAULT_BISHOPRIC];
-let priests = []; // ward priests, for Blessing the Sacrament dropdowns
+let priests = [];    // ward priests, for Blessing the Sacrament dropdowns
+let organists = [];  // suggestions for the Organist field
+let conductors = []; // suggestions for the music Conductor field
 
 const MEETING_TYPES = [
   ["sacrament", "Sacrament Meeting"],
@@ -40,6 +42,7 @@ const KINDS = {
   youthSpeaker:     { label: "Youth Speaker" },
   speaker:          { label: "Speaker" },
   musical:          { label: "Special Musical Number" },
+  choir:            { label: "Choir" },
   intermediateHymn: { label: "Intermediate Hymn" },
   babyBlessing:     { label: "Baby Blessing" },
   testimonies:      { label: "Bearing of Testimonies" },
@@ -65,7 +68,7 @@ const PRAYER_KINDS = ["invocation", "benediction"];
 // canonical meeting order, used when the table view adds a missing item
 const CANON = ["announcements", "openingHymn", "invocation", "wardBusiness", "sacramentHymn",
   "sacrament", "blessing", "babyBlessing", "primarySpeaker", "youthSpeaker", "speaker", "musical",
-  "intermediateHymn", "testimonies", "closingHymn", "benediction", "custom"];
+  "choir", "intermediateHymn", "testimonies", "closingHymn", "benediction", "custom"];
 
 function defaultItems(type) {
   const mk = (kind, time) => blankItem(kind, time);
@@ -91,6 +94,7 @@ function blankItem(kind, time = 5) {
   else if (SPEAKER_KINDS.includes(kind)) Object.assign(it, { name: "", topic: "", confirmed: false, confirmedBy: "" });
   else if (PRAYER_KINDS.includes(kind)) Object.assign(it, { name: "", org: "", confirmed: false, confirmedBy: "" });
   else if (kind === "musical") Object.assign(it, { who: "", hymn: "", accompanist: "", confirmed: false, confirmedBy: "" });
+  else if (kind === "choir") Object.assign(it, { hymn: "", accompanist: "", confirmed: false, confirmedBy: "" });
   else if (kind === "blessing") Object.assign(it, { priest1: "", priest2: "" });
   else if (kind === "babyBlessing") Object.assign(it, { name: "" });
   else if (kind === "wardBusiness") Object.assign(it, { sustainings: [], releasings: [], other: "" });
@@ -143,12 +147,17 @@ export function initSacrament() {
           <button class="chip" data-view-mode="cards">Cards</button>
           <button class="chip" data-view-mode="table">Table</button>
         </div>
+        <button class="btn btn-sm" id="btn-toggle-past">Show previous Sundays</button>
         ${hasRole("bishopric") ? `<button class="btn" id="btn-edit-bishopric">⚙ Settings</button>` : ""}
       </div>
     </div>
     <div id="sunday-list"></div>`;
 
   panel.querySelector("#btn-edit-bishopric")?.addEventListener("click", editBishopric);
+  panel.querySelector("#btn-toggle-past").addEventListener("click", () => {
+    showPast = !showPast;
+    render();
+  });
   panel.querySelectorAll("[data-view-mode]").forEach((b) =>
     b.addEventListener("click", () => {
       viewMode = b.dataset.viewMode;
@@ -176,8 +185,10 @@ async function loadBishopric() {
       const d = snap.data();
       if (Array.isArray(d.bishopric) && d.bishopric.length) bishopric = d.bishopric;
       if (Array.isArray(d.priests)) priests = d.priests;
+      if (Array.isArray(d.organists)) organists = d.organists;
+      if (Array.isArray(d.conductors)) conductors = d.conductors;
     } else if (hasRole("bishopric")) {
-      await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [] });
+      await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [], organists: [], conductors: [] });
     }
   } catch { /* keep defaults */ }
   render();
@@ -196,6 +207,14 @@ function editBishopric() {
     <p class="row-sub" style="margin:0 0 .5rem">These names fill the "Blessing the Sacrament" dropdowns.</p>
     <div id="pr-rows">${nameRows("pr-name", priests)}</div>
     <button class="btn btn-sm" id="pr-add" type="button">+ Add priest</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Organists</div>
+    <p class="row-sub" style="margin:0 0 .5rem">Suggested in the Organist field each week.</p>
+    <div id="org-rows">${nameRows("org-name", organists)}</div>
+    <button class="btn btn-sm" id="org-add" type="button">+ Add organist</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Music Conductors</div>
+    <p class="row-sub" style="margin:0 0 .5rem">Suggested in the Conductor field each week.</p>
+    <div id="cond-rows">${nameRows("cond-name", conductors)}</div>
+    <button class="btn btn-sm" id="cond-add" type="button">+ Add conductor</button>
     <div class="modal-actions">
       <div class="right">
         <button class="btn" id="bp-cancel">Cancel</button>
@@ -209,18 +228,33 @@ function editBishopric() {
     `<div class="speaker-row"><input class="${cls}" value=""><button class="btn btn-sm set-del" type="button">✕</button></div>`);
   el.querySelector("#bp-add").addEventListener("click", () => addRow("#bp-rows", "bp-name"));
   el.querySelector("#pr-add").addEventListener("click", () => addRow("#pr-rows", "pr-name"));
+  el.querySelector("#org-add").addEventListener("click", () => addRow("#org-rows", "org-name"));
+  el.querySelector("#cond-add").addEventListener("click", () => addRow("#cond-rows", "cond-name"));
   el.querySelector("#bp-cancel").addEventListener("click", closeModal);
   el.querySelector("#bp-save").addEventListener("click", async () => {
-    const names = [...el.querySelectorAll(".bp-name")].map((i) => i.value.trim()).filter(Boolean);
-    const priestNames = [...el.querySelectorAll(".pr-name")].map((i) => i.value.trim()).filter(Boolean);
+    const collect = (cls) => [...el.querySelectorAll("." + cls)].map((i) => i.value.trim()).filter(Boolean);
+    const names = collect("bp-name");
     if (!names.length) { toast("Add at least one bishopric name"); return; }
+    const priestNames = collect("pr-name");
+    const organistNames = collect("org-name");
+    const conductorNames = collect("cond-name");
     try {
-      await setDoc(doc(db, "settings", "leadership"), { bishopric: names, priests: priestNames });
+      await setDoc(doc(db, "settings", "leadership"),
+        { bishopric: names, priests: priestNames, organists: organistNames, conductors: conductorNames });
       bishopric = names;
       priests = priestNames;
+      organists = organistNames;
+      conductors = conductorNames;
       closeModal(); toast("Settings saved"); render();
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
+}
+
+// datalist suggestions for the Organist / music Conductor inputs (cards, table, editor)
+function musicDatalists() {
+  return `
+    <datalist id="dl-organists">${organists.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+    <datalist id="dl-conductors">${conductors.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
 }
 
 // ---- Sunday helpers ----
@@ -284,21 +318,25 @@ function statusChips(m, date) {
   // no name -> grey/red (unassigned); name but not confirmed -> yellow "pending";
   // name + confirmed -> green with a checkmark and a "confirmed by" tooltip.
   // qe -> pill is clickable for quick inline assignment
-  const chip = (label, name, qe, confirmed, confirmedBy) => {
+  const chip = (label, name, qe, confirmed, confirmedBy, org) => {
     const hasName = !!name;
     const cls = !hasName ? (planned ? "st-miss" : "st-off") : confirmed ? "st-ok" : "st-pending";
     const clickable = qe && can;
     const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
     const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-icon">${icon}</span> <span class="st-label">${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-icon">${icon}</span> <span class="st-label">${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${org ? `<span class="st-org">${esc(org)}</span>` : ""}</span>`;
   };
 
   // Hymns pill covers 4 slots: opening/sacrament/closing hymns, plus the
   // intermediate slot whether it's currently a hymn or a special musical number.
   const coreHymns = items.filter((i) => i.kind !== "intermediateHymn" && HYMN_KINDS.includes(i.kind));
   const coreFilled = coreHymns.filter((h) => h.num || h.title).length;
-  const interItem = items.find((i) => i.kind === "intermediateHymn") || items.find((i) => i.kind === "musical");
-  const interFilled = interItem ? (interItem.kind === "musical" ? !!interItem.who : !!(interItem.num || interItem.title)) : false;
+  const interItem = items.find((i) => i.kind === "intermediateHymn") || items.find((i) => i.kind === "musical") || items.find((i) => i.kind === "choir");
+  const interFilled = interItem
+    ? interItem.kind === "musical" ? !!interItem.who
+    : interItem.kind === "choir" ? !!interItem.hymn
+    : !!(interItem.num || interItem.title)
+    : false;
   const hymnsTotal = coreHymns.length + (interItem ? 1 : 0);
   const hymnsFilled = coreFilled + (interFilled ? 1 : 0);
   const inv = of("invocation")[0];
@@ -325,9 +363,9 @@ function statusChips(m, date) {
   const chips = [
     chip("Conducting", m?.conducting, { t: "c" }, m?.conductingConfirmed, m?.conductingConfirmedBy),
     wbChip,
-    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy),
-    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy),
-    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> <span class="st-label">Hymns ${hymnsFilled}/${hymnsTotal}</span></span>`,
+    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org),
+    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org),
+    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> <span class="st-label">Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
   // one pill per speaker slot, regular speakers numbered
@@ -354,14 +392,21 @@ function render() {
     b.classList.toggle("active", b.dataset.viewMode === viewMode));
   document.querySelectorAll("#panel-sacrament [data-year]").forEach((b) =>
     b.classList.toggle("active", Number(b.dataset.year) === viewYear));
+  const pastBtn = document.getElementById("btn-toggle-past");
+  if (pastBtn) {
+    pastBtn.textContent = showPast ? "Hide previous Sundays" : "Show previous Sundays";
+    // past Sundays only exist within the current year's view
+    pastBtn.style.display = viewYear === new Date().getFullYear() ? "" : "none";
+  }
   if (viewMode === "table") renderTable(wrap);
   else renderCards(wrap);
 }
 
-// rest of the current year; the whole year for other years
+// rest of the current year (or the whole year if showPast is on); the whole year for other years
 function viewDates() {
   const thisYear = new Date().getFullYear();
-  return sundaysOfYear(viewYear, viewYear === thisYear ? currentWeekSunday() : null);
+  const fromDate = viewYear === thisYear && !showPast ? currentWeekSunday() : null;
+  return sundaysOfYear(viewYear, fromDate);
 }
 
 // ===== Cards view =====
@@ -378,6 +423,16 @@ function renderCards(wrap) {
     const nth = nthSunday(date);
     const total = planned ? (m.items || []).reduce((s, i) => s + (Number(i.time) || 0), 0) : 0;
     const babies = planned ? (m.items || []).filter((i) => i.kind === "babyBlessing") : [];
+    const hasChoir = planned ? (m.items || []).some((i) => i.kind === "choir") : false;
+    const announceText = planned ? (m.items || []).find((i) => i.kind === "announcements")?.text || "" : "";
+    const megaphone = canEdit && !isConf ? `
+      <button class="megaphone-btn${announceText ? " has-announce" : ""}" data-qe='{"t":"announce"}' title="${announceText ? "Announcements: " + esc(announceText).slice(0, 80) : "Add announcements"}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 5 6 9H3v6h3l5 4V5z"/>
+          <path d="M15.5 8.5a4 4 0 0 1 0 7"/>
+          <path d="M18.5 6a7.5 7.5 0 0 1 0 12"/>
+        </svg>
+      </button>` : "";
     return `
     <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
@@ -385,9 +440,8 @@ function renderCards(wrap) {
           <h3 style="margin:0">${fmtDate(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
-            ${babies.map((b) => `<span class="pill pill-baby" style="vertical-align:middle">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join(" ")}
           </h3>
-          <div class="row-sub">${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span> ` : ""}${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</div>
+          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${megaphone}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}<span>${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</span></div>
         </div>
         <div style="display:flex;gap:.4rem">
           ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}
@@ -397,7 +451,7 @@ function renderCards(wrap) {
       </div>
       ${statusChips(m, date)}
     </div>`;
-  }).join("");
+  }).join("") + musicDatalists();
 
   wrap.querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); editMeeting(b.dataset.edit); }));
@@ -485,10 +539,13 @@ function quickEdit(date, q) {
       occ[it.kind] = o + 1;
       hymnRows.push({ kind: it.kind, o, num: it.num || "", title: it.title || "" });
     });
-    // the intermediate slot can hold either a hymn or a special musical number
+    // the intermediate slot can hold a hymn, a special musical number, or the choir
     const interHymn = items.find((i) => i.kind === "intermediateHymn");
     const interMusical = items.find((i) => i.kind === "musical");
-    const interIsMusical = !!interMusical;
+    const interChoir = items.find((i) => i.kind === "choir");
+    const interMode = interChoir ? "choir" : interMusical ? "musical" : "hymn";
+    const modeBtn = (mode, label) =>
+      `<button class="chip ${interMode === mode ? "active" : ""}" data-inter-mode="${mode}" type="button">${label}</button>`;
 
     html = `<h3>Hymns ${dateLabel}</h3>
       ${hymnRows.map((h, i) => `
@@ -501,17 +558,30 @@ function quickEdit(date, q) {
       <div class="field" style="margin-bottom:.4rem">
         <span>Intermediate</span>
         <div class="chips" style="margin:.3rem 0 .5rem">
-          <button class="chip ${!interIsMusical ? "active" : ""}" id="qe-inter-hymn-btn" type="button">Hymn</button>
-          <button class="chip ${interIsMusical ? "active" : ""}" id="qe-inter-musical-btn" type="button">Special Musical #</button>
+          ${modeBtn("hymn", "Hymn")}${modeBtn("musical", "Special Musical #")}${modeBtn("choir", "Choir")}
         </div>
-        <div id="qe-inter-hymn-fields" style="display:${interIsMusical ? "none" : "flex"};gap:.4rem">
-          <input id="qe-inter-num" placeholder="#" inputmode="numeric" style="width:4.5rem" value="${esc(interHymn?.num || "")}">
-          <input id="qe-inter-title" placeholder="Hymn title" style="flex:1" value="${esc(interHymn?.title || "")}">
+        <div id="qe-inter-hymn-fields" style="display:${interMode === "hymn" ? "flex" : "none"};gap:.4rem">
+          <input id="qe-inter-num" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(interHymn?.num || "")}">
+          <input id="qe-inter-title" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(interHymn?.title || "")}">
         </div>
-        <div id="qe-inter-musical-fields" style="display:${interIsMusical ? "block" : "none"}">
-          <input id="qe-inter-who" placeholder="Performer(s)" style="width:100%;margin-bottom:.4rem" value="${esc(interMusical?.who || "")}">
-          <input id="qe-inter-piece" placeholder="Hymn / piece" style="width:100%;margin-bottom:.4rem" value="${esc(interMusical?.hymn || "")}">
-          <input id="qe-inter-acc" placeholder="Accompanist" style="width:100%" value="${esc(interMusical?.accompanist || "")}">
+        <div id="qe-inter-musical-fields" style="display:${interMode === "musical" ? "block" : "none"}">
+          <label class="field" style="margin-bottom:.4rem">Hymn name
+            <input id="qe-inter-piece" autocomplete="off" value="${esc(interMusical?.hymn || "")}">
+          </label>
+          <label class="field" style="margin-bottom:.4rem">Participants
+            <input id="qe-inter-who" autocomplete="off" value="${esc(interMusical?.who || "")}">
+          </label>
+          <label class="field">Accompanist
+            <input id="qe-inter-acc" autocomplete="off" value="${esc(interMusical?.accompanist || "")}">
+          </label>
+        </div>
+        <div id="qe-inter-choir-fields" style="display:${interMode === "choir" ? "block" : "none"}">
+          <label class="field" style="margin-bottom:.4rem">Hymn name
+            <input id="qe-inter-choir-piece" autocomplete="off" value="${esc(interChoir?.hymn || "")}">
+          </label>
+          <label class="field">Accompanist
+            <input id="qe-inter-choir-acc" autocomplete="off" value="${esc(interChoir?.accompanist || "")}">
+          </label>
         </div>
       </div>`;
 
@@ -521,9 +591,11 @@ function quickEdit(date, q) {
         num: el.querySelector(`#qe-num-${i}`).value.trim(),
         title: el.querySelector(`#qe-title-${i}`).value.trim(),
       }));
-      const nowMusical = el.querySelector("#qe-inter-musical-fields").style.display !== "none";
-      const interVal = nowMusical
+      const nowMode = el.querySelector("[data-inter-mode].active")?.dataset.interMode || "hymn";
+      const interVal = nowMode === "musical"
         ? { who: el.querySelector("#qe-inter-who").value.trim(), hymn: el.querySelector("#qe-inter-piece").value.trim(), accompanist: el.querySelector("#qe-inter-acc").value.trim() }
+        : nowMode === "choir"
+        ? { hymn: el.querySelector("#qe-inter-choir-piece").value.trim(), accompanist: el.querySelector("#qe-inter-choir-acc").value.trim() }
         : { num: el.querySelector("#qe-inter-num").value.trim(), title: el.querySelector("#qe-inter-title").value.trim() };
       return (m) => {
         vals.forEach((v) => {
@@ -531,18 +603,34 @@ function quickEdit(date, q) {
           if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
           it.num = v.num; it.title = v.title;
         });
-        // swap the intermediate slot between an intermediateHymn item and a musical item
-        const idxIH = m.items.findIndex((i) => i.kind === "intermediateHymn");
-        const idxMus = m.items.findIndex((i) => i.kind === "musical");
-        if (nowMusical) {
-          if (idxMus >= 0) Object.assign(m.items[idxMus], interVal);
-          else if (idxIH >= 0) m.items[idxIH] = { kind: "musical", time: m.items[idxIH].time, confirmed: false, confirmedBy: "", ...interVal };
-          else insertCanonical(m.items, { kind: "musical", time: 3, confirmed: false, confirmedBy: "", ...interVal });
+        // swap the intermediate slot between an intermediateHymn / musical / choir item
+        const SLOT_KINDS = ["intermediateHymn", "musical", "choir"];
+        const targetKind = nowMode === "hymn" ? "intermediateHymn" : nowMode;
+        const firstSlot = m.items.find((i) => SLOT_KINDS.includes(i.kind));
+        const time = firstSlot ? firstSlot.time : 3;
+        // drop any slot items of a different kind so the swap never leaves duplicates
+        m.items = m.items.filter((i) => !SLOT_KINDS.includes(i.kind) || i.kind === targetKind);
+        const existing = m.items.find((i) => i.kind === targetKind);
+        if (existing) {
+          Object.assign(existing, interVal);
         } else {
-          if (idxIH >= 0) Object.assign(m.items[idxIH], interVal);
-          else if (idxMus >= 0) m.items[idxMus] = { kind: "intermediateHymn", time: m.items[idxMus].time, ...interVal };
-          else insertCanonical(m.items, { kind: "intermediateHymn", time: 3, ...interVal });
+          const base = targetKind === "intermediateHymn" ? {} : { confirmed: false, confirmedBy: "" };
+          insertCanonical(m.items, { kind: targetKind, time, ...base, ...interVal });
         }
+      };
+    };
+  } else if (q.t === "announce") {
+    const annIt = items.find((i) => i.kind === "announcements") || blankItem("announcements");
+    html = `<h3>Announcements ${dateLabel}</h3>
+      <label class="field">
+        <textarea id="qe-announce-text" rows="4" placeholder="Announcements for this Sunday">${esc(annIt.text || "")}</textarea>
+      </label>`;
+    onSave = (el) => {
+      const text = el.querySelector("#qe-announce-text").value.trim();
+      return (m) => {
+        let it = m.items.find((i) => i.kind === "announcements");
+        if (!it) { it = blankItem("announcements"); insertCanonical(m.items, it); }
+        it.text = text;
       };
     };
   } else if (q.t === "wb") {
@@ -662,19 +750,15 @@ function quickEdit(date, q) {
     if (e.target.dataset.wbdel) e.target.closest(".speaker-row").remove();
   });
 
-  // intermediate slot: Hymn / Special Musical # toggle
-  el.querySelector("#qe-inter-hymn-btn")?.addEventListener("click", (e) => {
-    el.querySelector("#qe-inter-hymn-fields").style.display = "flex";
-    el.querySelector("#qe-inter-musical-fields").style.display = "none";
-    e.target.classList.add("active");
-    el.querySelector("#qe-inter-musical-btn").classList.remove("active");
-  });
-  el.querySelector("#qe-inter-musical-btn")?.addEventListener("click", (e) => {
-    el.querySelector("#qe-inter-hymn-fields").style.display = "none";
-    el.querySelector("#qe-inter-musical-fields").style.display = "block";
-    e.target.classList.add("active");
-    el.querySelector("#qe-inter-hymn-btn").classList.remove("active");
-  });
+  // intermediate slot: Hymn / Special Musical # / Choir toggle
+  el.querySelectorAll("[data-inter-mode]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.interMode;
+      el.querySelector("#qe-inter-hymn-fields").style.display = mode === "hymn" ? "flex" : "none";
+      el.querySelector("#qe-inter-musical-fields").style.display = mode === "musical" ? "block" : "none";
+      el.querySelector("#qe-inter-choir-fields").style.display = mode === "choir" ? "block" : "none";
+      el.querySelectorAll("[data-inter-mode]").forEach((b) => b.classList.toggle("active", b === btn));
+    }));
 
   el.querySelector("#qe-cancel").addEventListener("click", closeModal);
   el.querySelector("#qe-save").addEventListener("click", async () => {
@@ -763,6 +847,8 @@ function renderAgendaView(m) {
     } else if (it.kind === "musical") {
       val = esc([it.who, it.hymn ? "— " + it.hymn : ""].filter(Boolean).join(" "))
         + (it.accompanist ? ` <span class="row-sub">(accompanist: ${esc(it.accompanist)})</span>` : "");
+    } else if (it.kind === "choir") {
+      val = esc(it.hymn || "") + (it.accompanist ? ` <span class="row-sub">(accompanist: ${esc(it.accompanist)})</span>` : "");
     } else if (it.kind === "blessing") {
       val = esc([it.priest1, it.priest2].filter(Boolean).join(" & "));
     } else if (it.kind === "babyBlessing") {
@@ -849,8 +935,10 @@ function renderTable(wrap) {
     }
 
     const mus = first("musical");
+    const choir = first("choir");
     const interHtml = isConf ? "" :
-      mus ? `♫ ${esc(mus.who || "—")}` : `
+      mus ? `♫ ${esc(mus.who || "—")}` :
+      choir ? `🎵 Choir${choir.hymn ? " — " + esc(choir.hymn) : ""}` : `
       <div class="hymn-cell">
         <input class="cell-in cell-num" data-date="${date}" data-cell="hymnNum" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.num || "")}" placeholder="#" inputmode="numeric" ${dis}>
         <input class="cell-in" data-date="${date}" data-cell="hymnTitle" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.title || "")}" placeholder="name" ${dis}>
@@ -877,8 +965,8 @@ function renderTable(wrap) {
         ${wbPillHtml(m, date, canEdit)}`}
       </td>
       <td>${isConf ? "" : `
-        <label class="cell-label">Cond.<input class="cell-in" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="—" ${dis}></label>
-        <label class="cell-label">Org.<input class="cell-in" data-date="${date}" data-cell="organist" value="${esc(m?.organist || "")}" placeholder="—" ${dis}></label>`}
+        <label class="cell-label">Cond.<input class="cell-in" list="dl-conductors" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="—" ${dis}></label>
+        <label class="cell-label">Org.<input class="cell-in" list="dl-organists" data-date="${date}" data-cell="organist" value="${esc(m?.organist || "")}" placeholder="—" ${dis}></label>`}
       </td>
       ${hymnCell("openingHymn")}
       ${prayerCell("invocation")}
@@ -892,12 +980,8 @@ function renderTable(wrap) {
 
   wrap.innerHTML = `
     <div class="card table-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.6rem">
-        ${viewYear === new Date().getFullYear()
-          ? `<button class="btn btn-sm" id="tbl-past">${showPast ? "Hide previous Sundays" : "← Show previous Sundays"}</button>`
-          : "<span></span>"}
+      <div style="text-align:center;margin-bottom:.5rem">
         <span class="row-sub">${viewYear} · ${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}</span>
-        <span></span>
       </div>
       <div class="table-scroll">
         <table class="sheet">
@@ -910,9 +994,8 @@ function renderTable(wrap) {
         </table>
       </div>
       <p class="row-sub" style="margin:.6rem 0 0">Type directly in a cell to assign — changes save when you leave the cell. Click a date to see the full agenda, or the Speakers cell to open the full editor.</p>
-    </div>`;
+    </div>` + musicDatalists();
 
-  wrap.querySelector("#tbl-past")?.addEventListener("click", () => { showPast = !showPast; render(); });
   wrap.querySelectorAll("[data-view]").forEach((td) =>
     td.addEventListener("click", () => viewMeeting(td.dataset.view)));
   wrap.querySelectorAll("[data-editspk]").forEach((td) =>
@@ -1031,8 +1114,8 @@ function editMeeting(date) {
       </label>
       <label class="field">Presiding ${personSelect("mt-presiding", m.presiding || "")}</label>
       <label class="field">Conducting ${personSelect("mt-conducting", m.conducting || "")}</label>
-      <label class="field">Music conductor <input id="mt-chorister" value="${esc(m.chorister || "")}"></label>
-      <label class="field">Organist <input id="mt-organist" value="${esc(m.organist || "")}"></label>
+      <label class="field">Music conductor <input id="mt-chorister" list="dl-conductors" value="${esc(m.chorister || "")}"></label>
+      <label class="field">Organist <input id="mt-organist" list="dl-organists" value="${esc(m.organist || "")}"></label>
     </div>
     <div id="mt-agenda-wrap" style="${NO_MEETING(type) ? "display:none" : ""}">
       <div class="mtg-sec-title" style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center">
@@ -1204,9 +1287,12 @@ function itemCard(it, i) {
               ${ORGS.map((o) => `<option value="${o}" ${it.org === o ? "selected" : ""}>${o}</option>`).join("")}
             </select>`;
   } else if (it.kind === "musical") {
-    body = `<input class="f-who" placeholder="Who (person/group)" style="flex:1" value="${esc(it.who || "")}">
-            <input class="f-hymn" placeholder="Hymn / piece" style="flex:1" value="${esc(it.hymn || "")}">
-            <input class="f-acc" placeholder="Accompanist" style="flex:1" value="${esc(it.accompanist || "")}">`;
+    body = `<input class="f-who" placeholder="Who (person/group)" autocomplete="off" style="flex:1" value="${esc(it.who || "")}">
+            <input class="f-hymn" placeholder="Hymn / piece" autocomplete="off" style="flex:1" value="${esc(it.hymn || "")}">
+            <input class="f-acc" placeholder="Accompanist" autocomplete="off" style="flex:1" value="${esc(it.accompanist || "")}">`;
+  } else if (it.kind === "choir") {
+    body = `<input class="f-hymn" placeholder="Hymn / piece" autocomplete="off" style="flex:1" value="${esc(it.hymn || "")}">
+            <input class="f-acc" placeholder="Accompanist" autocomplete="off" style="flex:1" value="${esc(it.accompanist || "")}">`;
   } else if (it.kind === "blessing") {
     const priestSel = (cls, val) => `
       <select class="${cls}" style="flex:1">
@@ -1270,6 +1356,7 @@ function syncDraft(el) {
     else if (SPEAKER_KINDS.includes(it.kind)) { it.name = v("f-name"); it.topic = v("f-topic"); }
     else if (PRAYER_KINDS.includes(it.kind)) { it.name = v("f-name"); it.org = card.querySelector(".f-org")?.value || ""; }
     else if (it.kind === "musical") { it.who = v("f-who"); it.hymn = v("f-hymn"); it.accompanist = v("f-acc"); }
+    else if (it.kind === "choir") { it.hymn = v("f-hymn"); it.accompanist = v("f-acc"); }
     else if (it.kind === "blessing") { it.priest1 = card.querySelector(".f-p1")?.value || ""; it.priest2 = card.querySelector(".f-p2")?.value || ""; }
     else if (it.kind === "babyBlessing") { it.name = v("f-name"); }
     else if (it.kind === "custom") { it.label = v("f-label"); it.text = v("f-text"); }

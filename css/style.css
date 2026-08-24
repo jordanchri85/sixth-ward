@@ -245,6 +245,8 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 .st-miss { background: #fbe7e3; color: var(--danger); }
 .st-off { background: #edf0f3; color: var(--ink-soft); }
+.st-click { cursor: pointer; }
+.st-click:hover { filter: brightness(.95); text-decoration: underline; }
 
 .table-card { padding: .8rem; }
 .table-scroll { overflow-x: auto; }
@@ -264,6 +266,17 @@ table.sheet .row-past td { background: #f6f7f9; opacity: .75; }
 table.sheet .row-unplanned td { background: #fcfdfe; }
 table.sheet .row-conf td { background: #eceef1; color: var(--ink-soft); }
 table.sheet .conf-cell { background: #eceef1; }
+table.sheet .row-fast td { background: #fdf6e0; }
+table.sheet .row-fast.row-past td { background: #f7f1e2; }
+.nth-pill {
+  font-size: .7rem; font-weight: 700;
+  padding: .1rem .45rem; border-radius: 99px;
+  background: #e9ecef; color: var(--ink-soft);
+}
+.nth-5 { background: #ede4f7; color: #6a3fa8; }
+.spk-washed { color: #b9c2cc; font-style: italic; font-size: .78rem; line-height: 1.4; }
+.hymn-cell { display: flex; gap: .2rem; }
+.cell-num { min-width: 2.6rem !important; width: 2.6rem; flex: none; }
 .cell-date { cursor: pointer; white-space: nowrap; }
 .cell-date:hover b { color: var(--brand); text-decoration: underline; }
 .cell-spk.clickable:hover { background: #f2f6fa; }

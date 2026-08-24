@@ -2,12 +2,12 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787580734";
-import { ctx, hasRole } from "./app.js?v=1787580734";
+import { db } from "./firebase-init.js?v=1787581015";
+import { ctx, hasRole } from "./app.js?v=1787581015";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787580734";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787581015";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -261,9 +261,11 @@ function musicDatalists() {
 const isoOf = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function currentWeekSunday() {
+// today if it's Sunday, otherwise the next Sunday — past Sundays never lead the page
+function upcomingSunday() {
   const d = new Date();
-  d.setDate(d.getDate() - ((d.getDay() + 7) % 7));
+  const dow = d.getDay();
+  if (dow !== 0) d.setDate(d.getDate() + (7 - dow));
   return isoOf(d);
 }
 
@@ -421,7 +423,7 @@ function render() {
 // rest of the current year (or the whole year if showPast is on); the whole year for other years
 function viewDates() {
   const thisYear = new Date().getFullYear();
-  const fromDate = viewYear === thisYear && !showPast ? currentWeekSunday() : null;
+  const fromDate = viewYear === thisYear && !showPast ? upcomingSunday() : null;
   return sundaysOfYear(viewYear, fromDate);
 }
 
@@ -918,7 +920,7 @@ function renderTable(wrap) {
   const thisYear = new Date().getFullYear();
   // default: this week onward; "show previous" reveals the whole year (past rows dimmed)
   const dates = (viewYear === thisYear && !showPast)
-    ? sundaysOfYear(viewYear, currentWeekSunday())
+    ? sundaysOfYear(viewYear, upcomingSunday())
     : sundaysOfYear(viewYear);
 
   const rows = dates.map((date) => {

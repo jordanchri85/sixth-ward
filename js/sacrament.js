@@ -48,6 +48,12 @@ const KINDS = {
 };
 
 const HYMN_KINDS = ["openingHymn", "sacramentHymn", "intermediateHymn", "closingHymn"];
+// compact labels for the table's Type column
+const SHORT_TYPE = {
+  sacrament: "—", fast: "Fast & Testimony", conference: "Gen. Conference",
+  stakeconf: "Stake Conf.", primary: "Primary Prog.", christmas: "Christmas",
+  easter: "Easter", other: "Other",
+};
 // types with no ward sacrament meeting at all
 const NO_MEETING = (t) => t === "conference" || t === "stakeconf";
 // types where assigned speakers don't apply (washed out in the table)
@@ -255,10 +261,15 @@ function statusChips(m, date) {
   if (NO_MEETING(type)) return "";
   const items = itemsFor(m, date);
   const planned = !!m;
+  const can = hasRole("bishopric");
   const of = (k) => items.filter((i) => i.kind === k);
-  // ok + name -> green pill that expands to show the person
-  const chip = (label, ok, name) =>
-    `<span class="st ${ok ? "st-ok" : planned ? "st-miss" : "st-off"}">${ok ? "✓" : "○"} ${label}${ok && name ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
+  // ok + name -> green pill that expands to show the person;
+  // qe -> pill is clickable for quick inline assignment
+  const chip = (label, ok, name, qe) => {
+    const cls = ok ? "st-ok" : planned ? "st-miss" : "st-off";
+    const clickable = qe && can;
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}' title="Click to assign"` : ""}>${ok ? "✓" : "○"} ${label}${ok && name ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
+  };
 
   const hymns = items.filter((i) => HYMN_KINDS.includes(i.kind));
   const hymnsFilled = hymns.filter((h) => h.num || h.title).length;
@@ -266,10 +277,10 @@ function statusChips(m, date) {
   const ben = of("benediction")[0];
 
   const chips = [
-    chip("Conducting", !!m?.conducting, m?.conducting),
-    chip("Open Prayer", !!inv?.name, inv?.name),
-    chip("Close Prayer", !!ben?.name, ben?.name),
-    chip(`Hymns ${hymnsFilled}/${hymns.length}`, hymns.length > 0 && hymnsFilled === hymns.length),
+    chip("Conducting", !!m?.conducting, m?.conducting, { t: "c" }),
+    chip("Open Prayer", !!inv?.name, inv?.name, { t: "i", k: "invocation", o: 0 }),
+    chip("Close Prayer", !!ben?.name, ben?.name, { t: "i", k: "benediction", o: 0 }),
+    chip(`Hymns ${hymnsFilled}/${hymns.length}`, hymns.length > 0 && hymnsFilled === hymns.length, null, { t: "h" }),
   ];
 
   // Ward Business: grey when none entered; green + clickable when there is some
@@ -290,17 +301,20 @@ function statusChips(m, date) {
   // one pill per speaker slot, regular speakers numbered
   const regTotal = of("speaker").length;
   let sNum = 0;
+  const occ = {};
   items.forEach((it) => {
     if (!SPEAKER_KINDS.includes(it.kind)) return;
+    const o = occ[it.kind] ?? 0;
+    occ[it.kind] = o + 1;
     let label = KINDS[it.kind].label;
     if (it.kind === "speaker") { sNum++; if (regTotal > 1) label = `Speaker ${sNum}`; }
-    chips.push(chip(label, !!it.name, it.name));
+    chips.push(chip(label, !!it.name, it.name, { t: "i", k: it.kind, o }));
   });
 
   // musical number: grey when not on the agenda, red when unassigned, green + name when set
   const mus = of("musical");
-  if (mus.length) mus.forEach((x) => chips.push(chip("Musical #", !!x.who, x.who)));
-  else chips.push(`<span class="st st-off">○ Musical #</span>`);
+  if (mus.length) mus.forEach((x, o) => chips.push(chip("Musical #", !!x.who, x.who, { t: "i", k: "musical", o })));
+  else chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"i","k":"musical","o":0}' title="Click to assign"` : ""}>○ Musical #</span>`);
 
   return `<div class="st-row">${chips.join("")}</div>`;
 }
@@ -358,8 +372,127 @@ function renderCards(wrap) {
     b.addEventListener("click", (e) => { e.stopPropagation(); editMeeting(b.dataset.edit); }));
   wrap.querySelectorAll("[data-wb]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); wbModal(el.dataset.wb); }));
+  wrap.querySelectorAll("[data-qe]").forEach((el) =>
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      quickEdit(el.closest("[data-date]").dataset.date, JSON.parse(el.dataset.qe));
+    }));
   wrap.querySelectorAll(".card.clickable").forEach((card) =>
     card.addEventListener("click", () => viewMeeting(card.dataset.date)));
+}
+
+// find the o-th item of a kind
+function nthItem(items, kind, o) {
+  let c = 0;
+  for (const it of items) if (it.kind === kind) { if (c === o) return it; c++; }
+  return null;
+}
+
+// ===== Quick assignment from a status pill =====
+function quickEdit(date, q) {
+  const cur = meetings[date];
+  const type = cur?.type || defaultTypeFor(date);
+  const items = cur?.items ? cur.items : defaultItems(type);
+  const dateLabel = `<span class="row-sub">· ${fmtDate(date, { year: true })}</span>`;
+
+  const orgSel = (id, val) => `
+    <select id="${id}"><option value="">Arranged by…</option>
+      ${ORGS.map((o) => `<option value="${o}" ${val === o ? "selected" : ""}>${o}</option>`).join("")}
+    </select>`;
+
+  let html = "", onSave = null;
+
+  if (q.t === "c") {
+    html = `<h3>Conducting ${dateLabel}</h3>
+      <label class="field">Conducting ${personSelect("qe-cond", cur?.conducting || "")}</label>`;
+    onSave = (el) => {
+      const val = readPersonSelect(el, "qe-cond");
+      return (m) => { m.conducting = val; };
+    };
+  } else if (q.t === "h") {
+    const hymnRows = [];
+    const occ = {};
+    items.forEach((it) => {
+      if (!HYMN_KINDS.includes(it.kind)) return;
+      const o = occ[it.kind] ?? 0;
+      occ[it.kind] = o + 1;
+      hymnRows.push({ kind: it.kind, o, num: it.num || "", title: it.title || "" });
+    });
+    html = `<h3>Hymns ${dateLabel}</h3>
+      ${hymnRows.map((h, i) => `
+        <label class="field" style="margin-bottom:.6rem">${KINDS[h.kind].label}
+          <div style="display:flex;gap:.4rem">
+            <input id="qe-num-${i}" placeholder="#" inputmode="numeric" style="width:4.5rem" value="${esc(h.num)}">
+            <input id="qe-title-${i}" placeholder="Hymn title" style="flex:1" value="${esc(h.title)}">
+          </div>
+        </label>`).join("")}`;
+    onSave = (el) => {
+      const vals = hymnRows.map((h, i) => ({
+        kind: h.kind, o: h.o,
+        num: el.querySelector(`#qe-num-${i}`).value.trim(),
+        title: el.querySelector(`#qe-title-${i}`).value.trim(),
+      }));
+      return (m) => vals.forEach((v) => {
+        let it = nthItem(m.items, v.kind, v.o);
+        if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
+        it.num = v.num; it.title = v.title;
+      });
+    };
+  } else {
+    const it = nthItem(items, q.k, q.o) || blankItem(q.k);
+    const label = KINDS[q.k]?.label || q.k;
+    if (PRAYER_KINDS.includes(q.k)) {
+      html = `<h3>${label} ${dateLabel}</h3>
+        <label class="field">Name <input id="qe-name" value="${esc(it.name || "")}"></label>
+        <label class="field" style="margin-top:.6rem">Arranged by ${orgSel("qe-org", it.org || "")}</label>`;
+      onSave = (el) => {
+        const name = el.querySelector("#qe-name").value.trim();
+        const org = el.querySelector("#qe-org").value;
+        return (m) => { const t = ensureQE(m, q); t.name = name; t.org = org; };
+      };
+    } else if (SPEAKER_KINDS.includes(q.k)) {
+      html = `<h3>${label} ${dateLabel}</h3>
+        <label class="field">Name <input id="qe-name" value="${esc(it.name || "")}"></label>
+        <label class="field" style="margin-top:.6rem">Topic (optional) <input id="qe-topic" value="${esc(it.topic || "")}"></label>`;
+      onSave = (el) => {
+        const name = el.querySelector("#qe-name").value.trim();
+        const topic = el.querySelector("#qe-topic").value.trim();
+        return (m) => { const t = ensureQE(m, q); t.name = name; t.topic = topic; };
+      };
+    } else if (q.k === "musical") {
+      html = `<h3>${label} ${dateLabel}</h3>
+        <label class="field">Who (person/group) <input id="qe-who" value="${esc(it.who || "")}"></label>
+        <label class="field" style="margin-top:.6rem">Hymn / piece <input id="qe-hymn" value="${esc(it.hymn || "")}"></label>
+        <label class="field" style="margin-top:.6rem">Accompanist <input id="qe-acc" value="${esc(it.accompanist || "")}"></label>`;
+      onSave = (el) => {
+        const who = el.querySelector("#qe-who").value.trim();
+        const hymn = el.querySelector("#qe-hymn").value.trim();
+        const acc = el.querySelector("#qe-acc").value.trim();
+        return (m) => { const t = ensureQE(m, q); t.who = who; t.hymn = hymn; t.accompanist = acc; };
+      };
+    } else return;
+  }
+
+  const el = openModal(html + `
+    <div class="modal-actions">
+      <div class="right">
+        <button class="btn" id="qe-cancel">Cancel</button>
+        <button class="btn btn-primary" id="qe-save">Save</button>
+      </div>
+    </div>`);
+  el.querySelector("#qe-cancel").addEventListener("click", closeModal);
+  el.querySelector("#qe-save").addEventListener("click", async () => {
+    const mutate = onSave(el);
+    await patchMeeting(date, mutate);
+    closeModal();
+  });
+  el.querySelector("input, select")?.focus();
+}
+
+function ensureQE(m, q) {
+  let it = nthItem(m.items, q.k, q.o);
+  if (!it) { it = blankItem(q.k); insertCanonical(m.items, it); }
+  return it;
 }
 
 // Ward Business quick popup
@@ -535,10 +668,10 @@ function renderTable(wrap) {
       </td>
       <td>
         <select class="cell-sel" data-date="${date}" data-cell="type" ${dis}>
-          ${MEETING_TYPES.map(([k, l]) => `<option value="${k}" ${type === k ? "selected" : ""}>${l}</option>`).join("")}
+          ${MEETING_TYPES.map(([k]) => `<option value="${k}" ${type === k ? "selected" : ""}>${SHORT_TYPE[k] || k}</option>`).join("")}
         </select>
+        ${isConf ? "" : `<input class="cell-in cell-theme" data-date="${date}" data-cell="theme" value="${esc(m?.theme || "")}" placeholder="theme" ${dis}>`}
       </td>
-      ${textCell("theme", m?.theme, "theme")}
       <td>${isConf ? "" : `
         <select class="cell-sel" data-date="${date}" data-cell="conducting" ${dis}>
           <option value="">—</option>
@@ -546,8 +679,10 @@ function renderTable(wrap) {
           ${m?.conducting && !bishopric.includes(m.conducting) ? `<option value="${esc(m.conducting)}" selected>${esc(m.conducting)}</option>` : ""}
         </select>`}
       </td>
-      ${textCell("chorister", m?.chorister, "name")}
-      ${textCell("organist", m?.organist, "name")}
+      <td>${isConf ? "" : `
+        <input class="cell-in" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="conductor" ${dis}>
+        <input class="cell-in" data-date="${date}" data-cell="organist" value="${esc(m?.organist || "")}" placeholder="organist" ${dis}>`}
+      </td>
       ${hymnCell("openingHymn")}
       ${prayerCell("invocation")}
       ${hymnCell("sacramentHymn")}
@@ -570,7 +705,7 @@ function renderTable(wrap) {
       <div class="table-scroll">
         <table class="sheet">
           <thead><tr>
-            <th>Date</th><th>Type</th><th>Theme</th><th>Conducting</th><th>Conductor</th><th>Organist</th>
+            <th>Date</th><th>Type / Theme</th><th>Conducting</th><th>Conductor / Organist</th>
             <th>Opening Hymn</th><th>Opening Prayer</th><th>Sacrament Hymn</th><th>Speakers</th>
             <th>Interm. / Musical</th><th>Closing Hymn</th><th>Closing Prayer</th>
           </tr></thead>
@@ -715,13 +850,46 @@ function editMeeting(date) {
     <div class="modal-actions">
       ${meetings[date] ? `<button class="btn btn-ghost btn-danger" id="mt-clear">Clear plan</button>` : ""}
       <div class="right">
-        <button class="btn" id="mt-cancel">Cancel</button>
-        <button class="btn btn-primary" id="mt-save">Save</button>
+        <span id="mt-autosave" class="row-sub" style="align-self:center"></span>
+        <button class="btn btn-primary" id="mt-save">Done</button>
       </div>
     </div>`);
 
   el.classList.add("modal-wide");
   renderItems(el);
+
+  // ---- autosave: every field change (tab/blur/select) writes the plan ----
+  const buildData = () => {
+    syncDraft(el);
+    const t = el.querySelector("#mt-type").value;
+    return {
+      date,
+      type: t,
+      customType: t === "other" ? el.querySelector("#mt-custom").value.trim() : "",
+      theme: el.querySelector("#mt-theme").value.trim(),
+      presiding: readPersonSelect(el, "mt-presiding"),
+      conducting: readPersonSelect(el, "mt-conducting"),
+      chorister: el.querySelector("#mt-chorister").value.trim(),
+      organist: el.querySelector("#mt-organist").value.trim(),
+      items: NO_MEETING(t) ? [] : draft.items,
+      notes: el.querySelector("#mt-notes").value.trim(),
+      updatedAt: serverTimestamp(),
+    };
+  };
+  let autoTimer = null;
+  const scheduleAutosave = () => {
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(async () => {
+      try {
+        await setDoc(doc(db, "meetings", date), buildData());
+        const tag = el.querySelector("#mt-autosave");
+        if (tag) { tag.textContent = "Saved ✓"; setTimeout(() => { tag.textContent = ""; }, 1800); }
+      } catch (err) {
+        toast("Couldn't save: " + (err.code || err.message));
+      }
+    }, 400);
+  };
+  el.addEventListener("change", scheduleAutosave);
 
   // person selects: toggle "Other…" inputs
   el.addEventListener("change", (e) => {
@@ -748,32 +916,19 @@ function editMeeting(date) {
     syncDraft(el);
     draft.items.push(blankItem(el.querySelector("#mt-add-kind").value));
     renderItems(el);
+    scheduleAutosave();
   });
 
-  el.querySelector("#mt-cancel").addEventListener("click", closeModal);
   el.querySelector("#mt-clear")?.addEventListener("click", async () => {
     if (!confirm("Clear this Sunday's plan?")) return;
+    clearTimeout(autoTimer); // don't let a pending autosave resurrect the plan
     await deleteDoc(doc(db, "meetings", date));
     closeModal(); toast("Plan cleared");
   });
   el.querySelector("#mt-save").addEventListener("click", async () => {
-    syncDraft(el);
-    const t = el.querySelector("#mt-type").value;
-    const data = {
-      date,
-      type: t,
-      customType: t === "other" ? el.querySelector("#mt-custom").value.trim() : "",
-      theme: el.querySelector("#mt-theme").value.trim(),
-      presiding: readPersonSelect(el, "mt-presiding"),
-      conducting: readPersonSelect(el, "mt-conducting"),
-      chorister: el.querySelector("#mt-chorister").value.trim(),
-      organist: el.querySelector("#mt-organist").value.trim(),
-      items: NO_MEETING(t) ? [] : draft.items,
-      notes: el.querySelector("#mt-notes").value.trim(),
-      updatedAt: serverTimestamp(),
-    };
+    clearTimeout(autoTimer);
     try {
-      await setDoc(doc(db, "meetings", date), data);
+      await setDoc(doc(db, "meetings", date), buildData());
       closeModal(); toast("Saved");
     } catch (err) {
       toast("Couldn't save: " + (err.code || err.message));
@@ -802,6 +957,7 @@ function renderItems(el) {
       if (act === "delsus") draft.items[i].sustainings.splice(Number(b.dataset.row), 1);
       if (act === "delrel") draft.items[i].releasings.splice(Number(b.dataset.row), 1);
       renderItems(el);
+      el.dispatchEvent(new Event("change")); // structural edits autosave too
     }));
 
   // drag & drop (grab the ≡ handle)
@@ -825,6 +981,7 @@ function renderItems(el) {
       draft.items.splice(overIdx, 0, moved);
       dragIdx = null;
       renderItems(el);
+      el.dispatchEvent(new Event("change"));
     });
   });
 }

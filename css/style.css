@@ -263,15 +263,18 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   margin-left: calc(50% - (100vw - 2rem) / 2);
 }
 .table-scroll { overflow-x: auto; }
-table.sheet { border-collapse: collapse; font-size: .82rem; min-width: 88rem; width: 100%; }
-table.sheet td:nth-child(2) select { min-width: 9.5rem; }
-table.sheet td:nth-child(4) select { min-width: 8.5rem; }
+table.sheet { border-collapse: collapse; font-size: .82rem; min-width: 78rem; width: 100%; }
+table.sheet td:nth-child(2) select { min-width: 6.8rem; max-width: 8rem; }
+table.sheet td:nth-child(3) select { min-width: 8.5rem; }
+.cell-theme { font-style: italic; color: var(--accent); }
 table.sheet th {
   background: var(--brand-soft); color: var(--brand);
   font-size: .72rem; text-transform: uppercase; letter-spacing: .03em;
   padding: .45rem .45rem; text-align: left;
   border: 1px solid var(--line); position: sticky; top: 0;
+  min-width: 6.5rem;
 }
+table.sheet th:first-child { min-width: 3.5rem; }
 table.sheet td {
   border: 1px solid var(--line);
   padding: .3rem .35rem; vertical-align: top;
@@ -296,7 +299,7 @@ table.sheet .row-fast.row-past td { background: #f7f1e2; }
 .cell-date:hover b { color: var(--brand); text-decoration: underline; }
 .cell-spk.clickable:hover { background: #f2f6fa; }
 .cell-in {
-  width: 100%; min-width: 6rem; font: inherit; font-size: .82rem;
+  width: 100%; min-width: 0; font: inherit; font-size: .82rem;
   border: 1px solid transparent; border-radius: 4px; padding: .2rem .25rem;
   background: transparent;
 }

@@ -6,6 +6,7 @@ const modalEl = document.getElementById("modal");
 export function openModal(html) {
   modalEl.innerHTML = html;
   backdrop.classList.remove("hidden");
+  backdrop.scrollTop = 0; // always open at the top, not where the last modal left off
   return modalEl;
 }
 

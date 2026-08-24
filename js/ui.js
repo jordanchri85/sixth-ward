@@ -1,10 +1,19 @@
 // Small shared UI helpers: modal, toast, date formatting.
 
 const backdrop = document.getElementById("modal-backdrop");
-const modalEl = document.getElementById("modal");
+let modalEl = document.getElementById("modal");
 
 export function openModal(html) {
-  modalEl.innerHTML = html;
+  // Replace the modal element with a fresh one on every open. Callers attach
+  // delegated listeners directly to the modal element; reusing it would let
+  // those listeners pile up across opens (e.g. one "+ Add" click inserting
+  // several rows). A fresh element also resets any modal-wide class.
+  const fresh = document.createElement("div");
+  fresh.id = "modal";
+  fresh.className = "modal";
+  fresh.innerHTML = html;
+  modalEl.replaceWith(fresh);
+  modalEl = fresh;
   backdrop.classList.remove("hidden");
   backdrop.scrollTop = 0; // always open at the top, not where the last modal left off
   return modalEl;

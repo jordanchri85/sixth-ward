@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787583562";
-import { ctx, hasRole } from "./app.js?v=1787583562";
+import { db } from "./firebase-init.js?v=1787584110";
+import { ctx, hasRole } from "./app.js?v=1787584110";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787583562";
-import { HYMNS } from "./hymns.js?v=1787583562";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787584110";
+import { HYMNS } from "./hymns.js?v=1787584110";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -562,17 +562,33 @@ function statusChips(m, date) {
     chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Interm. / Musical</span></span>`);
   }
 
-  // one pill per speaker slot, regular speakers numbered
-  const regTotal = of("speaker").length;
-  let sNum = 0;
-  const occ = {};
-  items.forEach((it) => {
-    if (!SPEAKER_KINDS.includes(it.kind)) return;
-    const o = occ[it.kind] ?? 0;
-    occ[it.kind] = o + 1;
-    let label = KINDS[it.kind].label;
-    if (it.kind === "speaker") { sNum++; if (regTotal > 1) label = `Speaker ${sNum}`; }
-    chips.push(chip(label, it.name, { t: "i", k: it.kind, o }, it.confirmed, it.confirmedBy, null, it.topic));
+  // Speaker pills, per kind. Up to 2 adult speakers (or 1 primary/youth)
+  // show individually; beyond that they collapse into one "N Speakers"
+  // pill that opens the group editor. All speaker pills open that editor,
+  // which is also where slots are added and removed.
+  const SPK_DEFS = [
+    ["primarySpeaker", "Primary Speaker", "Primary Speakers", 1],
+    ["youthSpeaker", "Youth Speaker", "Youth Speakers", 1],
+    ["speaker", "Speaker", "Speakers", 2],
+  ];
+  SPK_DEFS.forEach(([kind, single, plural, maxIndividual]) => {
+    const list = of(kind);
+    if (!list.length) return;
+    const qe = { t: "spk", k: kind };
+    if (list.length <= maxIndividual) {
+      list.forEach((it, i) => {
+        const label = kind === "speaker" && list.length > 1 ? `Speaker ${i + 1}` : single;
+        chips.push(chip(label, it.name, qe, it.confirmed, it.confirmedBy, null, it.topic));
+      });
+    } else {
+      const named = list.filter((s) => s.name).length;
+      const allNamed = named === list.length;
+      const allConfirmed = allNamed && list.every((s) => s.confirmed);
+      const cls = named === 0 ? (planned ? "st-miss" : "st-off") : allConfirmed ? "st-ok" : "st-pending";
+      const icon = allConfirmed ? "✓" : named ? "●" : "○";
+      const sub = allNamed ? "" : `${named} of ${list.length} assigned`;
+      chips.push(`<span class="st ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to view or edit"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${plural}</span><span class="st-name">${list.length} Speakers</span>${sub ? `<span class="st-sub">${sub}</span>` : ""}</span>`);
+    }
   });
 
   return `<div class="st-row">${chips.join("")}</div>`;
@@ -817,6 +833,46 @@ function quickEdit(date, q) {
         }
       };
     };
+  } else if (q.t === "spk") {
+    // group editor for one speaker kind: edit, confirm, add, and remove slots
+    const kind = q.k;
+    const label = KINDS[kind].label;
+    const list = items.filter((i) => i.kind === kind).map((s) => ({ ...s }));
+    if (!list.length) list.push({ name: "", topic: "", confirmed: false, confirmedBy: "" });
+    const rowHtml = (s) => `
+      <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+        <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1" value="${esc(s.name || "")}">
+        <input class="spk-topic" placeholder="Topic (optional)" autocomplete="off" style="flex:1" value="${esc(s.topic || "")}">
+        <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;white-space:nowrap">
+          <input type="checkbox" class="spk-conf" ${s.confirmed ? "checked" : ""}> Confirmed</label>
+        <button class="btn btn-sm spk-del" type="button" title="Remove this speaker slot">✕</button>
+      </div>`;
+    html = `<h3>${label}s ${dateLabel}</h3>
+      <p class="row-sub" style="margin:.2rem 0 .6rem">✕ removes a slot entirely; leave the name blank to keep an unassigned slot.</p>
+      <div id="qe-spk-rows">${list.map(rowHtml).join("")}</div>
+      <button class="btn btn-sm" id="qe-spk-add" type="button">+ Add ${label.toLowerCase()}</button>`;
+    onSave = (el) => {
+      const rows = [...el.querySelectorAll("#qe-spk-rows .spk-row")].map((r) => ({
+        name: r.querySelector(".spk-name").value.trim(),
+        topic: r.querySelector(".spk-topic").value.trim(),
+        confirmed: r.querySelector(".spk-conf").checked,
+      }));
+      return (m) => {
+        const existing = m.items.filter((i) => i.kind === kind);
+        rows.forEach((r, i) => {
+          let it = existing[i];
+          if (!it) { it = blankItem(kind); insertCanonical(m.items, it); }
+          const wasConfirmed = it.confirmed;
+          it.name = r.name; it.topic = r.topic;
+          it.confirmed = r.confirmed;
+          it.confirmedBy = r.confirmed ? (wasConfirmed ? it.confirmedBy : ctx.name) : "";
+        });
+        if (existing.length > rows.length) {
+          const surplus = new Set(existing.slice(rows.length));
+          m.items = m.items.filter((i) => !surplus.has(i));
+        }
+      };
+    };
   } else if (q.t === "announce") {
     // one input row per announcement; stored as newline-separated text
     const annIt = items.find((i) => i.kind === "announcements") || blankItem("announcements");
@@ -965,6 +1021,19 @@ function quickEdit(date, q) {
       el.querySelector("#qe-ann-rows .speaker-row:last-child .ann-line")?.focus();
     }
     if (e.target.classList.contains("ann-del")) e.target.closest(".speaker-row").remove();
+    // speaker group rows
+    if (e.target.id === "qe-spk-add") {
+      el.querySelector("#qe-spk-rows").insertAdjacentHTML("beforeend", `
+        <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+          <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1">
+          <input class="spk-topic" placeholder="Topic (optional)" autocomplete="off" style="flex:1">
+          <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;white-space:nowrap">
+            <input type="checkbox" class="spk-conf"> Confirmed</label>
+          <button class="btn btn-sm spk-del" type="button" title="Remove this speaker slot">✕</button>
+        </div>`);
+      el.querySelector("#qe-spk-rows .spk-row:last-child .spk-name")?.focus();
+    }
+    if (e.target.classList.contains("spk-del")) e.target.closest(".spk-row").remove();
   });
 
   // intermediate slot: Hymn / Special Musical # / Choir toggle

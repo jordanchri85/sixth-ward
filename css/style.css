@@ -307,6 +307,18 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-weight: 700; font-size: .66rem;
   white-space: normal;
 }
+/* hymn approvals manager */
+.ha-row {
+  display: flex; align-items: center; gap: .45rem;
+  padding: .28rem .1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: .87rem;
+}
+.ha-row:last-child { border-bottom: none; }
+.ha-name { flex: 1; min-width: 0; }
+.ha-blocked .ha-name { opacity: .45; text-decoration: line-through; }
+.ha-row .chip { font-size: .74rem; padding: .18rem .6rem; }
+
 /* compact Conducting chip up on the date line (frees a slot in the pill row) */
 .cond-inline {
   display: inline-block;

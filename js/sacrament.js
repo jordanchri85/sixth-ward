@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787582175";
-import { ctx, hasRole } from "./app.js?v=1787582175";
+import { db } from "./firebase-init.js?v=1787582773";
+import { ctx, hasRole } from "./app.js?v=1787582773";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787582175";
-import { HYMNS } from "./hymns.js?v=1787582175";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787582773";
+import { HYMNS } from "./hymns.js?v=1787582773";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -18,6 +18,8 @@ let priests = [];    // ward priests, for Blessing the Sacrament dropdowns
 let organists = [];  // suggestions for the Organist field
 let conductors = []; // suggestions for the music Conductor field
 let customHymns = []; // [{num, title}] added under ⚙ Settings, merged into the catalog
+let blockedHymns = [];      // hymn numbers un-approved by the bishop: stay listed, leave the pickers
+let sacramentApproved = []; // hymn numbers approved for the Sacrament Hymn slot
 
 // ---- Hymn catalog (both hymnbooks + custom additions) ----
 function hymnCatalog() {
@@ -32,11 +34,32 @@ function hymnNumForTitle(title) {
   const t = String(title).trim().toLowerCase();
   return hymnCatalog().find((h) => h.title.toLowerCase() === t)?.num || "";
 }
+// pickers only offer approved hymns; the sacrament slot narrows further when
+// a sacrament-approved set exists
+function approvedCatalog() {
+  const blocked = new Set(blockedHymns.map(String));
+  return hymnCatalog().filter((h) => !blocked.has(h.num));
+}
+function sacramentCatalog() {
+  const appr = approvedCatalog();
+  if (!sacramentApproved.length) return appr;
+  const sac = new Set(sacramentApproved.map(String));
+  return appr.filter((h) => sac.has(h.num));
+}
 function hymnDatalists() {
-  const cat = hymnCatalog();
-  return `
-    <datalist id="dl-hymn-nums">${cat.map((h) => `<option value="${esc(h.num)}" label="${esc(h.title)}"></option>`).join("")}</datalist>
-    <datalist id="dl-hymn-titles">${cat.map((h) => `<option value="${esc(h.title)}" label="#${esc(h.num)}"></option>`).join("")}</datalist>`;
+  const opts = (cat, id, byTitle) => `<datalist id="${id}">${cat.map((h) =>
+    byTitle ? `<option value="${esc(h.title)}" label="#${esc(h.num)}"></option>`
+            : `<option value="${esc(h.num)}" label="${esc(h.title)}"></option>`).join("")}</datalist>`;
+  const cat = approvedCatalog();
+  const sac = sacramentCatalog();
+  return opts(cat, "dl-hymn-nums") + opts(cat, "dl-hymn-titles", true)
+       + opts(sac, "dl-sac-hymn-nums") + opts(sac, "dl-sac-hymn-titles", true);
+}
+function warnIfBlocked(num) {
+  const n = String(num || "").trim();
+  if (n && blockedHymns.map(String).includes(n)) {
+    toast(`⚠️ Hymn #${n} is not on the approved list`);
+  }
 }
 // pair a #-input with its title-input: picking/typing one fills the other
 function wireHymnAutofill(numInput, titleInput) {
@@ -44,10 +67,12 @@ function wireHymnAutofill(numInput, titleInput) {
   numInput.addEventListener("change", () => {
     const t = hymnTitleForNum(numInput.value);
     if (t) titleInput.value = t;
+    warnIfBlocked(numInput.value);
   });
   titleInput.addEventListener("change", () => {
     const n = hymnNumForTitle(titleInput.value);
     if (n) numInput.value = n;
+    warnIfBlocked(numInput.value);
   });
 }
 
@@ -222,6 +247,8 @@ async function loadBishopric() {
       if (Array.isArray(d.organists)) organists = d.organists;
       if (Array.isArray(d.conductors)) conductors = d.conductors;
       if (Array.isArray(d.customHymns)) customHymns = d.customHymns;
+      if (Array.isArray(d.blockedHymns)) blockedHymns = d.blockedHymns;
+      if (Array.isArray(d.sacramentApproved)) sacramentApproved = d.sacramentApproved;
     } else if (hasRole("bishopric")) {
       await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [], organists: [], conductors: [] });
     }
@@ -259,6 +286,9 @@ function editBishopric() {
         <button class="btn btn-sm set-del" type="button">✕</button>
       </div>`).join("")}</div>
     <button class="btn btn-sm" id="ch-add" type="button">+ Add hymn</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Hymn approvals</div>
+    <p class="row-sub" style="margin:0 0 .5rem">Choose which hymns can be picked, and which are approved as sacrament hymns. (Save any changes above first — this opens a separate window.)</p>
+    <button class="btn btn-sm" id="ch-manage" type="button">Manage hymn approvals…</button>
     <div class="modal-actions">
       <div class="right">
         <button class="btn" id="bp-cancel">Cancel</button>
@@ -280,6 +310,7 @@ function editBishopric() {
         <input class="ch-title" placeholder="Hymn title">
         <button class="btn btn-sm set-del" type="button">✕</button>
       </div>`));
+  el.querySelector("#ch-manage").addEventListener("click", () => { closeModal(); hymnApprovalModal(); });
   el.querySelector("#bp-cancel").addEventListener("click", closeModal);
   el.querySelector("#bp-save").addEventListener("click", async () => {
     const collect = (cls) => [...el.querySelectorAll("." + cls)].map((i) => i.value.trim()).filter(Boolean);
@@ -301,6 +332,91 @@ function editBishopric() {
       conductors = conductorNames;
       customHymns = hymnRows;
       closeModal(); toast("Settings saved"); render();
+    } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
+  });
+}
+
+// ---- Hymn approvals manager: block hymns from the pickers, mark sacrament-approved ----
+function hymnApprovalModal() {
+  const blocked = new Set(blockedHymns.map(String));
+  const sacSet = new Set(sacramentApproved.map(String));
+  const cat = hymnCatalog();
+
+  const rowHtml = (h) => `
+    <div class="ha-row${blocked.has(h.num) ? " ha-blocked" : ""}" data-num="${esc(h.num)}" data-search="${esc((h.num + " " + h.title).toLowerCase())}">
+      <span class="ha-name">${esc(h.num)}. ${esc(h.title)}</span>
+      <button class="chip ha-sac ${sacSet.has(h.num) ? "active" : ""}" type="button" title="Approved as a sacrament hymn">Sacrament</button>
+      <button class="chip ha-appr ${blocked.has(h.num) ? "" : "active"}" type="button" title="Approved for selection">Approved</button>
+    </div>`;
+
+  const el = openModal(`
+    <h3>Hymn approvals</h3>
+    <p class="row-sub" style="margin:.2rem 0 .6rem">
+      Un-approve a hymn to keep it listed here but out of every picker.
+      Mark hymns <b>Sacrament</b> to control what's suggested for the sacrament hymn
+      (if none are marked, all approved hymns are suggested).
+    </p>
+    <input id="ha-search" placeholder="Search by number or title…" autocomplete="off"
+      style="width:100%;font:inherit;padding:.45rem .6rem;border:1px solid var(--line);border-radius:8px;margin-bottom:.5rem">
+    <div class="chips" id="ha-filters" style="margin-bottom:.5rem">
+      <button class="chip active" data-f="all" type="button">All</button>
+      <button class="chip" data-f="sac" type="button">Sacrament</button>
+      <button class="chip" data-f="blocked" type="button">Not approved</button>
+    </div>
+    <div id="ha-list" style="max-height:52vh;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:.2rem .5rem">
+      ${cat.map(rowHtml).join("")}
+    </div>
+    <div class="modal-actions">
+      <div class="right">
+        <button class="btn" id="ha-cancel">Cancel</button>
+        <button class="btn btn-primary" id="ha-save">Save</button>
+      </div>
+    </div>`);
+  el.classList.add("modal-wide");
+
+  let filter = "all";
+  const applyFilter = () => {
+    const q = el.querySelector("#ha-search").value.trim().toLowerCase();
+    el.querySelectorAll(".ha-row").forEach((row) => {
+      const num = row.dataset.num;
+      const matchesQ = !q || row.dataset.search.includes(q);
+      const matchesF = filter === "all"
+        || (filter === "sac" && sacSet.has(num))
+        || (filter === "blocked" && blocked.has(num));
+      row.style.display = matchesQ && matchesF ? "" : "none";
+    });
+  };
+  el.querySelector("#ha-search").addEventListener("input", applyFilter);
+  el.querySelector("#ha-filters").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    filter = chip.dataset.f;
+    el.querySelectorAll("#ha-filters .chip").forEach((c) => c.classList.toggle("active", c === chip));
+    applyFilter();
+  });
+
+  el.querySelector("#ha-list").addEventListener("click", (e) => {
+    const row = e.target.closest(".ha-row");
+    if (!row) return;
+    const num = row.dataset.num;
+    if (e.target.classList.contains("ha-sac")) {
+      sacSet.has(num) ? sacSet.delete(num) : sacSet.add(num);
+      e.target.classList.toggle("active", sacSet.has(num));
+    } else if (e.target.classList.contains("ha-appr")) {
+      blocked.has(num) ? blocked.delete(num) : blocked.add(num);
+      e.target.classList.toggle("active", !blocked.has(num));
+      row.classList.toggle("ha-blocked", blocked.has(num));
+    }
+  });
+
+  el.querySelector("#ha-cancel").addEventListener("click", closeModal);
+  el.querySelector("#ha-save").addEventListener("click", async () => {
+    try {
+      await setDoc(doc(db, "settings", "leadership"),
+        { blockedHymns: [...blocked], sacramentApproved: [...sacSet] }, { merge: true });
+      blockedHymns = [...blocked];
+      sacramentApproved = [...sacSet];
+      closeModal(); toast("Hymn approvals saved"); render();
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
 }
@@ -626,8 +742,8 @@ function quickEdit(date, q) {
       ${hymnRows.map((h, i) => `
         <label class="field" style="margin-bottom:.6rem">${KINDS[h.kind].label}
           <div style="display:flex;gap:.4rem">
-            <input id="qe-num-${i}" class="hymn-num" list="dl-hymn-nums" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(h.num)}">
-            <input id="qe-title-${i}" class="hymn-title" list="dl-hymn-titles" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(h.title)}">
+            <input id="qe-num-${i}" class="hymn-num" list="${h.kind === "sacramentHymn" ? "dl-sac-hymn-nums" : "dl-hymn-nums"}" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(h.num)}">
+            <input id="qe-title-${i}" class="hymn-title" list="${h.kind === "sacramentHymn" ? "dl-sac-hymn-titles" : "dl-hymn-titles"}" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(h.title)}">
           </div>
         </label>`).join("")}
       ${hymnDatalists()}`;
@@ -1008,9 +1124,9 @@ function renderTable(wrap) {
       const it = first(kind);
       return `
       <td><div class="hymn-cell">
-        <input class="cell-in cell-num" list="dl-hymn-nums" autocomplete="off" data-date="${date}" data-cell="hymnNum" data-kind="${kind}"
+        <input class="cell-in cell-num" list="${kind === "sacramentHymn" ? "dl-sac-hymn-nums" : "dl-hymn-nums"}" autocomplete="off" data-date="${date}" data-cell="hymnNum" data-kind="${kind}"
           value="${esc(it?.num || "")}" placeholder="#" inputmode="numeric" ${dis}>
-        <input class="cell-in" list="dl-hymn-titles" autocomplete="off" data-date="${date}" data-cell="hymnTitle" data-kind="${kind}"
+        <input class="cell-in" list="${kind === "sacramentHymn" ? "dl-sac-hymn-titles" : "dl-hymn-titles"}" autocomplete="off" data-date="${date}" data-cell="hymnTitle" data-kind="${kind}"
           value="${esc(it?.title || "")}" placeholder="name" ${dis}>
       </div></td>`;
     };
@@ -1176,6 +1292,7 @@ function commitCell(el) {
       it.num = val.trim();
       const t = hymnTitleForNum(it.num);
       if (t) it.title = t; // catalog match fills the title automatically
+      warnIfBlocked(it.num);
     } else if (cell === "hymnTitle") {
       const it = ensure(kind);
       it.title = val.trim();
@@ -1315,9 +1432,11 @@ function editMeeting(date) {
     if (e.target.classList.contains("f-num")) {
       const t = hymnTitleForNum(e.target.value);
       if (t) card.querySelector(".f-title").value = t;
+      warnIfBlocked(e.target.value);
     } else if (e.target.classList.contains("f-title")) {
       const n = hymnNumForTitle(e.target.value);
       if (n) card.querySelector(".f-num").value = n;
+      warnIfBlocked(card.querySelector(".f-num").value);
     }
   });
 
@@ -1410,8 +1529,8 @@ function itemCard(it, i) {
   const label = KINDS[it.kind]?.label || it.kind;
   let body = "";
   if (HYMN_KINDS.includes(it.kind)) {
-    body = `<input class="f-num" list="dl-hymn-nums" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4rem" value="${esc(it.num || "")}">
-            <input class="f-title" list="dl-hymn-titles" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(it.title || "")}">`;
+    body = `<input class="f-num" list="${it.kind === "sacramentHymn" ? "dl-sac-hymn-nums" : "dl-hymn-nums"}" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4rem" value="${esc(it.num || "")}">
+            <input class="f-title" list="${it.kind === "sacramentHymn" ? "dl-sac-hymn-titles" : "dl-hymn-titles"}" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(it.title || "")}">`;
   } else if (SPEAKER_KINDS.includes(it.kind)) {
     body = `<input class="f-name" placeholder="Name" style="flex:1" value="${esc(it.name || "")}">
             <input class="f-topic" placeholder="Topic (optional)" style="flex:1" value="${esc(it.topic || "")}">`;

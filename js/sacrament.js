@@ -13,6 +13,7 @@ const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young 
 
 const DEFAULT_BISHOPRIC = ["Bishop Christensen", "Brother Bennett", "Brother Beach"];
 let bishopric = [...DEFAULT_BISHOPRIC];
+let priests = []; // ward priests, for Blessing the Sacrament dropdowns
 
 const MEETING_TYPES = [
   ["sacrament", "Sacrament Meeting"],
@@ -33,6 +34,7 @@ const KINDS = {
   invocation:       { label: "Opening Prayer" },
   sacramentHymn:    { label: "Sacrament Hymn" },
   sacrament:        { label: "Administration of the Sacrament" },
+  blessing:         { label: "Blessing the Sacrament" },
   primarySpeaker:   { label: "Primary Speaker" },
   youthSpeaker:     { label: "Youth Speaker" },
   speaker:          { label: "Speaker" },
@@ -55,7 +57,7 @@ const PRAYER_KINDS = ["invocation", "benediction"];
 
 // canonical meeting order, used when the table view adds a missing item
 const CANON = ["announcements", "openingHymn", "invocation", "wardBusiness", "sacramentHymn",
-  "sacrament", "babyBlessing", "primarySpeaker", "youthSpeaker", "speaker", "musical",
+  "sacrament", "blessing", "babyBlessing", "primarySpeaker", "youthSpeaker", "speaker", "musical",
   "intermediateHymn", "testimonies", "closingHymn", "benediction", "custom"];
 
 function defaultItems(type) {
@@ -63,13 +65,13 @@ function defaultItems(type) {
   if (type === "fast") {
     return [
       mk("announcements", 3), mk("openingHymn", 3), mk("invocation", 2),
-      mk("wardBusiness", 3), mk("sacramentHymn", 3), mk("sacrament", 12),
+      mk("wardBusiness", 3), mk("sacramentHymn", 3), mk("blessing", 12),
       mk("testimonies", 30), mk("closingHymn", 3), mk("benediction", 2),
     ];
   }
   return [
     mk("announcements", 3), mk("openingHymn", 3), mk("invocation", 2),
-    mk("wardBusiness", 3), mk("sacramentHymn", 3), mk("sacrament", 12),
+    mk("wardBusiness", 3), mk("sacramentHymn", 3), mk("blessing", 12),
     mk("primarySpeaker", 3), mk("youthSpeaker", 5), mk("speaker", 10),
     mk("intermediateHymn", 3), mk("speaker", 12), mk("closingHymn", 3),
     mk("benediction", 2),
@@ -82,6 +84,7 @@ function blankItem(kind, time = 5) {
   else if (SPEAKER_KINDS.includes(kind)) Object.assign(it, { name: "", topic: "" });
   else if (PRAYER_KINDS.includes(kind)) Object.assign(it, { name: "", org: "" });
   else if (kind === "musical") Object.assign(it, { who: "", hymn: "", accompanist: "" });
+  else if (kind === "blessing") Object.assign(it, { priest1: "", priest2: "" });
   else if (kind === "babyBlessing") Object.assign(it, { name: "" });
   else if (kind === "wardBusiness") Object.assign(it, { sustainings: [], releasings: [], other: "" });
   else if (kind === "custom") Object.assign(it, { label: "", text: "" });
@@ -113,6 +116,7 @@ let meetings = {};   // date -> doc data
 let started = false;
 let viewMode = localStorage.getItem("sw-sacview") || "cards";
 let viewYear = new Date().getFullYear();
+let showPast = false; // table: include the current year's earlier Sundays
 
 export function initSacrament() {
   if (started) return;
@@ -132,7 +136,7 @@ export function initSacrament() {
           <button class="chip" data-view-mode="cards">Cards</button>
           <button class="chip" data-view-mode="table">Table</button>
         </div>
-        ${hasRole("bishopric") ? `<button class="btn" id="btn-edit-bishopric">⚙ Bishopric</button>` : ""}
+        ${hasRole("bishopric") ? `<button class="btn" id="btn-edit-bishopric">⚙ Settings</button>` : ""}
       </div>
     </div>
     <div id="sunday-list"></div>`;
@@ -161,23 +165,30 @@ export function initSacrament() {
 async function loadBishopric() {
   try {
     const snap = await getDoc(doc(db, "settings", "leadership"));
-    if (snap.exists() && Array.isArray(snap.data().bishopric) && snap.data().bishopric.length) {
-      bishopric = snap.data().bishopric;
+    if (snap.exists()) {
+      const d = snap.data();
+      if (Array.isArray(d.bishopric) && d.bishopric.length) bishopric = d.bishopric;
+      if (Array.isArray(d.priests)) priests = d.priests;
     } else if (hasRole("bishopric")) {
-      await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC });
+      await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [] });
     }
   } catch { /* keep defaults */ }
   render();
 }
 
 function editBishopric() {
+  const nameRows = (cls, list) => list.map((n) =>
+    `<div class="speaker-row"><input class="${cls}" value="${esc(n)}"><button class="btn btn-sm set-del" type="button">✕</button></div>`).join("");
   const el = openModal(`
-    <h3>Bishopric</h3>
-    <p class="row-sub" style="margin:0 0 .8rem">These names fill the Presiding and Conducting dropdowns.</p>
-    <div id="bp-rows">
-      ${bishopric.map((n) => `<div class="speaker-row"><input class="bp-name" value="${esc(n)}"><button class="btn btn-sm bp-del" type="button">✕</button></div>`).join("")}
-    </div>
+    <h3>Settings</h3>
+    <div class="mtg-sec-title">Bishopric</div>
+    <p class="row-sub" style="margin:0 0 .5rem">These names fill the Presiding and Conducting dropdowns.</p>
+    <div id="bp-rows">${nameRows("bp-name", bishopric)}</div>
     <button class="btn btn-sm" id="bp-add" type="button">+ Add name</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Priests</div>
+    <p class="row-sub" style="margin:0 0 .5rem">These names fill the "Blessing the Sacrament" dropdowns.</p>
+    <div id="pr-rows">${nameRows("pr-name", priests)}</div>
+    <button class="btn btn-sm" id="pr-add" type="button">+ Add priest</button>
     <div class="modal-actions">
       <div class="right">
         <button class="btn" id="bp-cancel">Cancel</button>
@@ -185,20 +196,22 @@ function editBishopric() {
       </div>
     </div>`);
   el.addEventListener("click", (e) => {
-    if (e.target.classList.contains("bp-del")) e.target.closest(".speaker-row").remove();
+    if (e.target.classList.contains("set-del")) e.target.closest(".speaker-row").remove();
   });
-  el.querySelector("#bp-add").addEventListener("click", () => {
-    el.querySelector("#bp-rows").insertAdjacentHTML("beforeend",
-      `<div class="speaker-row"><input class="bp-name" value=""><button class="btn btn-sm bp-del" type="button">✕</button></div>`);
-  });
+  const addRow = (wrapId, cls) => el.querySelector(wrapId).insertAdjacentHTML("beforeend",
+    `<div class="speaker-row"><input class="${cls}" value=""><button class="btn btn-sm set-del" type="button">✕</button></div>`);
+  el.querySelector("#bp-add").addEventListener("click", () => addRow("#bp-rows", "bp-name"));
+  el.querySelector("#pr-add").addEventListener("click", () => addRow("#pr-rows", "pr-name"));
   el.querySelector("#bp-cancel").addEventListener("click", closeModal);
   el.querySelector("#bp-save").addEventListener("click", async () => {
     const names = [...el.querySelectorAll(".bp-name")].map((i) => i.value.trim()).filter(Boolean);
-    if (!names.length) { toast("Add at least one name"); return; }
+    const priestNames = [...el.querySelectorAll(".pr-name")].map((i) => i.value.trim()).filter(Boolean);
+    if (!names.length) { toast("Add at least one bishopric name"); return; }
     try {
-      await setDoc(doc(db, "settings", "leadership"), { bishopric: names });
+      await setDoc(doc(db, "settings", "leadership"), { bishopric: names, priests: priestNames });
       bishopric = names;
-      closeModal(); toast("Bishopric saved"); render();
+      priests = priestNames;
+      closeModal(); toast("Settings saved"); render();
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
 }
@@ -323,6 +336,7 @@ function renderCards(wrap) {
     const isConf = NO_MEETING(type);
     const nth = nthSunday(date);
     const total = planned ? (m.items || []).reduce((s, i) => s + (Number(i.time) || 0), 0) : 0;
+    const babies = planned ? (m.items || []).filter((i) => i.kind === "babyBlessing") : [];
     return `
     <div class="card clickable ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
@@ -330,8 +344,9 @@ function renderCards(wrap) {
           <h3 style="margin:0">${fmtDate(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-inprogress" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
+            ${babies.map((b) => `<span class="pill pill-baby" style="vertical-align:middle">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join(" ")}
           </h3>
-          <div class="row-sub">${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ordinal(nth) + " Sunday"}${planned && total ? ` · ${total} min` : ""}${isConf ? " · no sacrament meeting" : ""}</div>
+          <div class="row-sub">${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span> ` : ""}${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</div>
         </div>
         ${canEdit ? `<button class="btn btn-sm" data-edit="${date}">${planned ? "Edit" : "Plan"}</button>` : ""}
       </div>
@@ -383,7 +398,7 @@ function viewMeeting(date) {
     return toast("Not planned yet");
   }
   const el = openModal(`
-    <h3>${fmtDate(date, { year: true })} <span class="row-sub">· ${ordinal(nthSunday(date))} Sunday · ${esc(typeLabel(m, date))}</span>
+    <h3>${fmtDate(date, { year: true })} <span class="row-sub">·${nthSunday(date) === 5 ? " 5th Sunday ·" : ""} ${esc(typeLabel(m, date))}</span>
       ${m.theme ? `<div class="theme-tag" style="margin-top:.2rem">“${esc(m.theme)}”</div>` : ""}</h3>
     ${renderAgendaView(m)}
     <div class="modal-actions">
@@ -419,6 +434,8 @@ function renderAgendaView(m) {
     } else if (it.kind === "musical") {
       val = esc([it.who, it.hymn ? "— " + it.hymn : ""].filter(Boolean).join(" "))
         + (it.accompanist ? ` <span class="row-sub">(accompanist: ${esc(it.accompanist)})</span>` : "");
+    } else if (it.kind === "blessing") {
+      val = esc([it.priest1, it.priest2].filter(Boolean).join(" & "));
     } else if (it.kind === "babyBlessing") {
       val = esc(it.name || "");
     } else if (it.kind === "wardBusiness") {
@@ -439,8 +456,11 @@ function renderAgendaView(m) {
 function renderTable(wrap) {
   const canEdit = hasRole("bishopric");
   const today = todayISO();
-  // the table shows the WHOLE selected year (past rows dimmed) for review
-  const dates = sundaysOfYear(viewYear);
+  const thisYear = new Date().getFullYear();
+  // default: this week onward; "show previous" reveals the whole year (past rows dimmed)
+  const dates = (viewYear === thisYear && !showPast)
+    ? sundaysOfYear(viewYear, currentWeekSunday())
+    : sundaysOfYear(viewYear);
 
   const rows = dates.map((date) => {
     const m = meetings[date];
@@ -511,7 +531,7 @@ function renderTable(wrap) {
     <tr class="${date < today ? "row-past" : ""} ${planned ? "" : "row-unplanned"} ${isConf ? "row-conf" : ""} ${type === "fast" ? "row-fast" : ""}">
       <td class="cell-date" data-view="${date}">
         <b>${shortDate}</b>
-        <div>${nth === 5 ? `<span class="nth-pill nth-5">5th</span>` : `<span class="row-sub">${ordinal(nth)}</span>`}</div>
+        ${nth === 5 ? `<div><span class="nth-pill nth-5">5th</span></div>` : ""}
       </td>
       <td>
         <select class="cell-sel" data-date="${date}" data-cell="type" ${dis}>
@@ -540,8 +560,12 @@ function renderTable(wrap) {
 
   wrap.innerHTML = `
     <div class="card table-card">
-      <div style="text-align:center;margin-bottom:.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.6rem">
+        ${viewYear === new Date().getFullYear()
+          ? `<button class="btn btn-sm" id="tbl-past">${showPast ? "Hide previous Sundays" : "← Show previous Sundays"}</button>`
+          : "<span></span>"}
         <span class="row-sub">${viewYear} · ${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}</span>
+        <span></span>
       </div>
       <div class="table-scroll">
         <table class="sheet">
@@ -556,6 +580,7 @@ function renderTable(wrap) {
       <p class="row-sub" style="margin:.6rem 0 0">Type directly in a cell to assign — changes save when you leave the cell. Click a date to see the full agenda, or the Speakers cell to open the full editor.</p>
     </div>`;
 
+  wrap.querySelector("#tbl-past")?.addEventListener("click", () => { showPast = !showPast; render(); });
   wrap.querySelectorAll("[data-view]").forEach((td) =>
     td.addEventListener("click", () => viewMeeting(td.dataset.view)));
   wrap.querySelectorAll("[data-editspk]").forEach((td) =>
@@ -654,7 +679,7 @@ function editMeeting(date) {
   };
 
   const el = openModal(`
-    <h3>${fmtDate(date, { year: true })} <span class="row-sub">· ${ordinal(nthSunday(date))} Sunday</span></h3>
+    <h3>${fmtDate(date, { year: true })}${nthSunday(date) === 5 ? ` <span class="nth-pill nth-5">5th Sunday</span>` : ""}</h3>
     <div class="form-grid two-col">
       <label class="field">Meeting type
         <select id="mt-type">
@@ -823,6 +848,15 @@ function itemCard(it, i) {
     body = `<input class="f-who" placeholder="Who (person/group)" style="flex:1" value="${esc(it.who || "")}">
             <input class="f-hymn" placeholder="Hymn / piece" style="flex:1" value="${esc(it.hymn || "")}">
             <input class="f-acc" placeholder="Accompanist" style="flex:1" value="${esc(it.accompanist || "")}">`;
+  } else if (it.kind === "blessing") {
+    const priestSel = (cls, val) => `
+      <select class="${cls}" style="flex:1">
+        <option value="">— Priest —</option>
+        ${priests.map((p) => `<option value="${esc(p)}" ${val === p ? "selected" : ""}>${esc(p)}</option>`).join("")}
+        ${val && !priests.includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ""}
+      </select>`;
+    body = priestSel("f-p1", it.priest1 || "") + priestSel("f-p2", it.priest2 || "")
+      + (priests.length ? "" : `<div class="row-sub" style="width:100%">Add priests under ⚙ Settings to fill these dropdowns.</div>`);
   } else if (it.kind === "babyBlessing") {
     body = `<input class="f-name" placeholder="Baby's name" style="flex:1" value="${esc(it.name || "")}">`;
   } else if (it.kind === "custom") {
@@ -877,6 +911,7 @@ function syncDraft(el) {
     else if (SPEAKER_KINDS.includes(it.kind)) { it.name = v("f-name"); it.topic = v("f-topic"); }
     else if (PRAYER_KINDS.includes(it.kind)) { it.name = v("f-name"); it.org = card.querySelector(".f-org")?.value || ""; }
     else if (it.kind === "musical") { it.who = v("f-who"); it.hymn = v("f-hymn"); it.accompanist = v("f-acc"); }
+    else if (it.kind === "blessing") { it.priest1 = card.querySelector(".f-p1")?.value || ""; it.priest2 = card.querySelector(".f-p2")?.value || ""; }
     else if (it.kind === "babyBlessing") { it.name = v("f-name"); }
     else if (it.kind === "custom") { it.label = v("f-label"); it.text = v("f-text"); }
     else if (it.kind === "wardBusiness") {

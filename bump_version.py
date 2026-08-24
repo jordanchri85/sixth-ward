@@ -38,5 +38,6 @@ sac_src = (ROOT / "js" / "sacrament.js").read_text()
 sac_stub = re.sub(r'(from "\.\/[\w-]+\.js)\?v=\d+(")', r'\1\2', sac_src)
 (ROOT / "test-stubs" / "sacrament.js").write_text(sac_stub)
 (ROOT / "test-stubs" / "ui.js").write_text((ROOT / "js" / "ui.js").read_text())
+(ROOT / "test-stubs" / "hymns.js").write_text((ROOT / "js" / "hymns.js").read_text())
 
 print(f"Stamped version {VERSION} across {changed} file(s).")

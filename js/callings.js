@@ -1,10 +1,10 @@
 // Callings tab (bishopric+): track open callings through the pipeline.
-import { db } from "./firebase-init.js?v=1787581015";
+import { db } from "./firebase-init.js?v=1787582175";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1787581015";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1787582175";
 
 const STAGES = [
   ["considering", "Considering"],

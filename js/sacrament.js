@@ -2,12 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787581015";
-import { ctx, hasRole } from "./app.js?v=1787581015";
+import { db } from "./firebase-init.js?v=1787582175";
+import { ctx, hasRole } from "./app.js?v=1787582175";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787581015";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787582175";
+import { HYMNS } from "./hymns.js?v=1787582175";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -16,6 +17,39 @@ let bishopric = [...DEFAULT_BISHOPRIC];
 let priests = [];    // ward priests, for Blessing the Sacrament dropdowns
 let organists = [];  // suggestions for the Organist field
 let conductors = []; // suggestions for the music Conductor field
+let customHymns = []; // [{num, title}] added under ⚙ Settings, merged into the catalog
+
+// ---- Hymn catalog (both hymnbooks + custom additions) ----
+function hymnCatalog() {
+  return HYMNS.map(([n, t]) => ({ num: String(n), title: t }))
+    .concat(customHymns.map((h) => ({ num: String(h.num || ""), title: h.title || "" })));
+}
+function hymnTitleForNum(num) {
+  const n = String(num).trim();
+  return hymnCatalog().find((h) => h.num === n)?.title || "";
+}
+function hymnNumForTitle(title) {
+  const t = String(title).trim().toLowerCase();
+  return hymnCatalog().find((h) => h.title.toLowerCase() === t)?.num || "";
+}
+function hymnDatalists() {
+  const cat = hymnCatalog();
+  return `
+    <datalist id="dl-hymn-nums">${cat.map((h) => `<option value="${esc(h.num)}" label="${esc(h.title)}"></option>`).join("")}</datalist>
+    <datalist id="dl-hymn-titles">${cat.map((h) => `<option value="${esc(h.title)}" label="#${esc(h.num)}"></option>`).join("")}</datalist>`;
+}
+// pair a #-input with its title-input: picking/typing one fills the other
+function wireHymnAutofill(numInput, titleInput) {
+  if (!numInput || !titleInput) return;
+  numInput.addEventListener("change", () => {
+    const t = hymnTitleForNum(numInput.value);
+    if (t) titleInput.value = t;
+  });
+  titleInput.addEventListener("change", () => {
+    const n = hymnNumForTitle(titleInput.value);
+    if (n) numInput.value = n;
+  });
+}
 
 const MEETING_TYPES = [
   ["sacrament", "Sacrament Meeting"],
@@ -187,6 +221,7 @@ async function loadBishopric() {
       if (Array.isArray(d.priests)) priests = d.priests;
       if (Array.isArray(d.organists)) organists = d.organists;
       if (Array.isArray(d.conductors)) conductors = d.conductors;
+      if (Array.isArray(d.customHymns)) customHymns = d.customHymns;
     } else if (hasRole("bishopric")) {
       await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [], organists: [], conductors: [] });
     }
@@ -215,6 +250,15 @@ function editBishopric() {
     <p class="row-sub" style="margin:0 0 .5rem">Suggested in the Conductor field each week.</p>
     <div id="cond-rows">${nameRows("cond-name", conductors)}</div>
     <button class="btn btn-sm" id="cond-add" type="button">+ Add conductor</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Custom hymns</div>
+    <p class="row-sub" style="margin:0 0 .5rem">Both hymnbooks are built in. When the Church releases new hymns, add them here and they'll appear in every hymn dropdown.</p>
+    <div id="ch-rows">${customHymns.map((h) => `
+      <div class="speaker-row">
+        <input class="ch-num" placeholder="#" inputmode="numeric" style="flex:0 0 5rem" value="${esc(h.num || "")}">
+        <input class="ch-title" placeholder="Hymn title" value="${esc(h.title || "")}">
+        <button class="btn btn-sm set-del" type="button">✕</button>
+      </div>`).join("")}</div>
+    <button class="btn btn-sm" id="ch-add" type="button">+ Add hymn</button>
     <div class="modal-actions">
       <div class="right">
         <button class="btn" id="bp-cancel">Cancel</button>
@@ -230,6 +274,12 @@ function editBishopric() {
   el.querySelector("#pr-add").addEventListener("click", () => addRow("#pr-rows", "pr-name"));
   el.querySelector("#org-add").addEventListener("click", () => addRow("#org-rows", "org-name"));
   el.querySelector("#cond-add").addEventListener("click", () => addRow("#cond-rows", "cond-name"));
+  el.querySelector("#ch-add").addEventListener("click", () => el.querySelector("#ch-rows").insertAdjacentHTML("beforeend", `
+      <div class="speaker-row">
+        <input class="ch-num" placeholder="#" inputmode="numeric" style="flex:0 0 5rem">
+        <input class="ch-title" placeholder="Hymn title">
+        <button class="btn btn-sm set-del" type="button">✕</button>
+      </div>`));
   el.querySelector("#bp-cancel").addEventListener("click", closeModal);
   el.querySelector("#bp-save").addEventListener("click", async () => {
     const collect = (cls) => [...el.querySelectorAll("." + cls)].map((i) => i.value.trim()).filter(Boolean);
@@ -238,13 +288,18 @@ function editBishopric() {
     const priestNames = collect("pr-name");
     const organistNames = collect("org-name");
     const conductorNames = collect("cond-name");
+    const hymnRows = [...el.querySelectorAll("#ch-rows .speaker-row")].map((row) => ({
+      num: row.querySelector(".ch-num").value.trim(),
+      title: row.querySelector(".ch-title").value.trim(),
+    })).filter((h) => h.num || h.title);
     try {
       await setDoc(doc(db, "settings", "leadership"),
-        { bishopric: names, priests: priestNames, organists: organistNames, conductors: conductorNames });
+        { bishopric: names, priests: priestNames, organists: organistNames, conductors: conductorNames, customHymns: hymnRows });
       bishopric = names;
       priests = priestNames;
       organists = organistNames;
       conductors = conductorNames;
+      customHymns = hymnRows;
       closeModal(); toast("Settings saved"); render();
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
@@ -343,9 +398,11 @@ function statusChips(m, date) {
   };
 
   // Hymns pill counts only actual hymn slots; the musical/choir slot gets its own pill
-  const hymnItems = items.filter((i) => HYMN_KINDS.includes(i.kind));
+  // Hymns pill = only the fixed hymns; the intermediate slot is its own pill
+  const hymnItems = items.filter((i) => HYMN_KINDS.includes(i.kind) && i.kind !== "intermediateHymn");
   const hymnsTotal = hymnItems.length;
   const hymnsFilled = hymnItems.filter((h) => h.num || h.title).length;
+  const slotInterHymn = items.find((i) => i.kind === "intermediateHymn");
   const slotMusical = items.find((i) => i.kind === "musical");
   const slotChoir = items.find((i) => i.kind === "choir");
   const inv = of("invocation")[0];
@@ -376,14 +433,17 @@ function statusChips(m, date) {
     `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
-  // Special Musical Number: its own pill right after Hymns.
-  // Clicking opens the Hymns editor, which owns the Hymn/Musical/Choir slot toggle.
+  // Intermediate slot: its own pill right after Hymns, with its own editor
+  // (Hymn / Special Musical # / Choir toggle lives there).
   if (slotMusical) {
-    chips.push(chip("Musical #", slotMusical.who, { t: "h" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn));
+    chips.push(chip("Musical #", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn));
   } else if (slotChoir) {
-    chips.push(chip("Musical #", "Choir", { t: "h" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn));
+    chips.push(chip("Musical #", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn));
+  } else if (slotInterHymn) {
+    const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
+    chips.push(chip("Interm. Hymn", hymnVal, { t: "inter" }, true, null));
   } else {
-    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"h"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Musical #</span></span>`);
+    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Interm. / Musical</span></span>`);
   }
 
   // one pill per speaker slot, regular speakers numbered
@@ -553,6 +613,7 @@ function quickEdit(date, q) {
       };
     };
   } else if (q.t === "h") {
+    // just the three fixed hymns; the intermediate slot has its own pill/editor
     const hymnRows = [];
     const occ = {};
     items.forEach((it) => {
@@ -561,58 +622,66 @@ function quickEdit(date, q) {
       occ[it.kind] = o + 1;
       hymnRows.push({ kind: it.kind, o, num: it.num || "", title: it.title || "" });
     });
-    // the intermediate slot can hold a hymn, a special musical number, or the choir
-    const interHymn = items.find((i) => i.kind === "intermediateHymn");
-    const interMusical = items.find((i) => i.kind === "musical");
-    const interChoir = items.find((i) => i.kind === "choir");
-    const interMode = interChoir ? "choir" : interMusical ? "musical" : "hymn";
-    const modeBtn = (mode, label) =>
-      `<button class="chip ${interMode === mode ? "active" : ""}" data-inter-mode="${mode}" type="button">${label}</button>`;
-
     html = `<h3>Hymns ${dateLabel}</h3>
       ${hymnRows.map((h, i) => `
         <label class="field" style="margin-bottom:.6rem">${KINDS[h.kind].label}
           <div style="display:flex;gap:.4rem">
-            <input id="qe-num-${i}" placeholder="#" inputmode="numeric" style="width:4.5rem" value="${esc(h.num)}">
-            <input id="qe-title-${i}" placeholder="Hymn title" style="flex:1" value="${esc(h.title)}">
+            <input id="qe-num-${i}" class="hymn-num" list="dl-hymn-nums" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(h.num)}">
+            <input id="qe-title-${i}" class="hymn-title" list="dl-hymn-titles" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(h.title)}">
           </div>
         </label>`).join("")}
-      <div class="field" style="margin-bottom:.4rem">
-        <span>Intermediate</span>
-        <div class="chips" style="margin:.3rem 0 .5rem">
-          ${modeBtn("hymn", "Hymn")}${modeBtn("musical", "Special Musical #")}${modeBtn("choir", "Choir")}
-        </div>
-        <div id="qe-inter-hymn-fields" style="display:${interMode === "hymn" ? "flex" : "none"};gap:.4rem">
-          <input id="qe-inter-num" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(interHymn?.num || "")}">
-          <input id="qe-inter-title" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(interHymn?.title || "")}">
-        </div>
-        <div id="qe-inter-musical-fields" style="display:${interMode === "musical" ? "block" : "none"}">
-          <label class="field" style="margin-bottom:.4rem">Hymn name
-            <input id="qe-inter-piece" autocomplete="off" value="${esc(interMusical?.hymn || "")}">
-          </label>
-          <label class="field" style="margin-bottom:.4rem">Participants
-            <input id="qe-inter-who" autocomplete="off" value="${esc(interMusical?.who || "")}">
-          </label>
-          <label class="field">Accompanist
-            <input id="qe-inter-acc" autocomplete="off" value="${esc(interMusical?.accompanist || "")}">
-          </label>
-        </div>
-        <div id="qe-inter-choir-fields" style="display:${interMode === "choir" ? "block" : "none"}">
-          <label class="field" style="margin-bottom:.4rem">Hymn name
-            <input id="qe-inter-choir-piece" autocomplete="off" value="${esc(interChoir?.hymn || "")}">
-          </label>
-          <label class="field">Accompanist
-            <input id="qe-inter-choir-acc" autocomplete="off" value="${esc(interChoir?.accompanist || "")}">
-          </label>
-        </div>
-      </div>`;
-
+      ${hymnDatalists()}`;
     onSave = (el) => {
       const vals = hymnRows.map((h, i) => ({
         kind: h.kind, o: h.o,
         num: el.querySelector(`#qe-num-${i}`).value.trim(),
         title: el.querySelector(`#qe-title-${i}`).value.trim(),
       }));
+      return (m) => {
+        vals.forEach((v) => {
+          let it = nthItem(m.items, v.kind, v.o);
+          if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
+          it.num = v.num; it.title = v.title;
+        });
+      };
+    };
+  } else if (q.t === "inter") {
+    // the intermediate slot: a hymn, a special musical number, or the choir
+    const interHymn = items.find((i) => i.kind === "intermediateHymn");
+    const interMusical = items.find((i) => i.kind === "musical");
+    const interChoir = items.find((i) => i.kind === "choir");
+    const interMode = interChoir ? "choir" : interMusical ? "musical" : "hymn";
+    const modeBtn = (mode, label) =>
+      `<button class="chip ${interMode === mode ? "active" : ""}" data-inter-mode="${mode}" type="button">${label}</button>`;
+    html = `<h3>Intermediate ${dateLabel}</h3>
+      <div class="chips" style="margin:.3rem 0 .6rem">
+        ${modeBtn("hymn", "Hymn")}${modeBtn("musical", "Special Musical #")}${modeBtn("choir", "Choir")}
+      </div>
+      <div id="qe-inter-hymn-fields" style="display:${interMode === "hymn" ? "flex" : "none"};gap:.4rem">
+        <input id="qe-inter-num" class="hymn-num" list="dl-hymn-nums" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4.5rem" value="${esc(interHymn?.num || "")}">
+        <input id="qe-inter-title" class="hymn-title" list="dl-hymn-titles" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(interHymn?.title || "")}">
+      </div>
+      <div id="qe-inter-musical-fields" style="display:${interMode === "musical" ? "block" : "none"}">
+        <label class="field" style="margin-bottom:.4rem">Hymn name
+          <input id="qe-inter-piece" autocomplete="off" value="${esc(interMusical?.hymn || "")}">
+        </label>
+        <label class="field" style="margin-bottom:.4rem">Participants
+          <input id="qe-inter-who" autocomplete="off" value="${esc(interMusical?.who || "")}">
+        </label>
+        <label class="field">Accompanist
+          <input id="qe-inter-acc" autocomplete="off" value="${esc(interMusical?.accompanist || "")}">
+        </label>
+      </div>
+      <div id="qe-inter-choir-fields" style="display:${interMode === "choir" ? "block" : "none"}">
+        <label class="field" style="margin-bottom:.4rem">Hymn name
+          <input id="qe-inter-choir-piece" autocomplete="off" value="${esc(interChoir?.hymn || "")}">
+        </label>
+        <label class="field">Accompanist
+          <input id="qe-inter-choir-acc" autocomplete="off" value="${esc(interChoir?.accompanist || "")}">
+        </label>
+      </div>
+      ${hymnDatalists()}`;
+    onSave = (el) => {
       const nowMode = el.querySelector("[data-inter-mode].active")?.dataset.interMode || "hymn";
       const interVal = nowMode === "musical"
         ? { who: el.querySelector("#qe-inter-who").value.trim(), hymn: el.querySelector("#qe-inter-piece").value.trim(), accompanist: el.querySelector("#qe-inter-acc").value.trim() }
@@ -620,11 +689,6 @@ function quickEdit(date, q) {
         ? { hymn: el.querySelector("#qe-inter-choir-piece").value.trim(), accompanist: el.querySelector("#qe-inter-choir-acc").value.trim() }
         : { num: el.querySelector("#qe-inter-num").value.trim(), title: el.querySelector("#qe-inter-title").value.trim() };
       return (m) => {
-        vals.forEach((v) => {
-          let it = nthItem(m.items, v.kind, v.o);
-          if (!it) { it = blankItem(v.kind, 3); insertCanonical(m.items, it); }
-          it.num = v.num; it.title = v.title;
-        });
         // swap the intermediate slot between an intermediateHymn / musical / choir item
         const SLOT_KINDS = ["intermediateHymn", "musical", "choir"];
         const targetKind = nowMode === "hymn" ? "intermediateHymn" : nowMode;
@@ -801,6 +865,10 @@ function quickEdit(date, q) {
       el.querySelectorAll("[data-inter-mode]").forEach((b) => b.classList.toggle("active", b === btn));
     }));
 
+  // hymn number <-> title autofill on any paired hymn inputs in this modal
+  el.querySelectorAll(".hymn-num").forEach((n) =>
+    wireHymnAutofill(n, n.parentElement.querySelector(".hymn-title")));
+
   el.querySelector("#qe-cancel").addEventListener("click", closeModal);
   el.querySelector("#qe-save").addEventListener("click", async () => {
     const mutate = onSave(el);
@@ -940,9 +1008,9 @@ function renderTable(wrap) {
       const it = first(kind);
       return `
       <td><div class="hymn-cell">
-        <input class="cell-in cell-num" data-date="${date}" data-cell="hymnNum" data-kind="${kind}"
+        <input class="cell-in cell-num" list="dl-hymn-nums" autocomplete="off" data-date="${date}" data-cell="hymnNum" data-kind="${kind}"
           value="${esc(it?.num || "")}" placeholder="#" inputmode="numeric" ${dis}>
-        <input class="cell-in" data-date="${date}" data-cell="hymnTitle" data-kind="${kind}"
+        <input class="cell-in" list="dl-hymn-titles" autocomplete="off" data-date="${date}" data-cell="hymnTitle" data-kind="${kind}"
           value="${esc(it?.title || "")}" placeholder="name" ${dis}>
       </div></td>`;
     };
@@ -983,11 +1051,11 @@ function renderTable(wrap) {
     const mus = first("musical");
     const choir = first("choir");
     const interHtml = isConf ? "" :
-      mus ? `♫ ${esc(mus.who || "—")}` :
-      choir ? `🎵 Choir${choir.hymn ? " — " + esc(choir.hymn) : ""}` : `
+      mus ? `<span class="${canEdit ? "st-click" : ""}"${canEdit ? ` data-date="${date}" data-qe='{"t":"inter"}'` : ""}>♫ ${esc(mus.who || "—")}</span>` :
+      choir ? `<span class="${canEdit ? "st-click" : ""}"${canEdit ? ` data-date="${date}" data-qe='{"t":"inter"}'` : ""}>🎵 Choir${choir.hymn ? " — " + esc(choir.hymn) : ""}</span>` : `
       <div class="hymn-cell">
-        <input class="cell-in cell-num" data-date="${date}" data-cell="hymnNum" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.num || "")}" placeholder="#" inputmode="numeric" ${dis}>
-        <input class="cell-in" data-date="${date}" data-cell="hymnTitle" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.title || "")}" placeholder="name" ${dis}>
+        <input class="cell-in cell-num" list="dl-hymn-nums" autocomplete="off" data-date="${date}" data-cell="hymnNum" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.num || "")}" placeholder="#" inputmode="numeric" ${dis}>
+        <input class="cell-in" list="dl-hymn-titles" autocomplete="off" data-date="${date}" data-cell="hymnTitle" data-kind="intermediateHymn" value="${esc(first("intermediateHymn")?.title || "")}" placeholder="name" ${dis}>
       </div>`;
 
     return `
@@ -1041,13 +1109,13 @@ function renderTable(wrap) {
         </table>
       </div>
       <p class="row-sub" style="margin:.6rem 0 0">Type directly in a cell to assign — changes save when you leave the cell. Click a date to see the full agenda, or the Speakers cell to open the full editor.</p>
-    </div>` + musicDatalists();
+    </div>` + musicDatalists() + hymnDatalists();
 
   wrap.querySelectorAll("[data-view]").forEach((td) =>
     td.addEventListener("click", () => viewMeeting(td.dataset.view)));
   wrap.querySelectorAll("[data-editspk]").forEach((td) =>
     td.addEventListener("click", () => editMeeting(td.dataset.editspk)));
-  wrap.querySelectorAll(".wb-pill[data-qe]").forEach((el) =>
+  wrap.querySelectorAll("[data-qe]").forEach((el) =>
     el.addEventListener("click", (e) => {
       e.stopPropagation();
       quickEdit(el.dataset.date, JSON.parse(el.dataset.qe));
@@ -1104,9 +1172,15 @@ function commitCell(el) {
     } else if (cell === "conducting") {
       m.conducting = val;
     } else if (cell === "hymnNum") {
-      ensure(kind).num = val.trim();
+      const it = ensure(kind);
+      it.num = val.trim();
+      const t = hymnTitleForNum(it.num);
+      if (t) it.title = t; // catalog match fills the title automatically
     } else if (cell === "hymnTitle") {
-      ensure(kind).title = val.trim();
+      const it = ensure(kind);
+      it.title = val.trim();
+      const n = hymnNumForTitle(it.title);
+      if (n) it.num = n;
     } else if (cell === "prayerName") {
       ensure(kind).name = val.trim();
     } else if (cell === "prayerOrg") {
@@ -1179,6 +1253,7 @@ function editMeeting(date) {
     <label class="field" style="margin-top:.8rem">Notes
       <textarea id="mt-notes" rows="2">${esc(m.notes || "")}</textarea>
     </label>
+    ${hymnDatalists()}
     <div class="modal-actions">
       ${meetings[date] ? `<button class="btn btn-ghost btn-danger" id="mt-clear">Clear plan</button>` : ""}
       <div class="right">
@@ -1230,6 +1305,19 @@ function editMeeting(date) {
       const inp = el.querySelector("#" + other);
       inp.style.display = e.target.value === "__other__" ? "" : "none";
       if (e.target.value === "__other__") inp.focus();
+    }
+  });
+
+  // hymn number <-> title autofill inside agenda item cards (delegated: items re-render)
+  el.addEventListener("change", (e) => {
+    const card = e.target.closest?.(".item-card");
+    if (!card || !HYMN_KINDS.includes(card.dataset.kind)) return;
+    if (e.target.classList.contains("f-num")) {
+      const t = hymnTitleForNum(e.target.value);
+      if (t) card.querySelector(".f-title").value = t;
+    } else if (e.target.classList.contains("f-title")) {
+      const n = hymnNumForTitle(e.target.value);
+      if (n) card.querySelector(".f-num").value = n;
     }
   });
 
@@ -1322,8 +1410,8 @@ function itemCard(it, i) {
   const label = KINDS[it.kind]?.label || it.kind;
   let body = "";
   if (HYMN_KINDS.includes(it.kind)) {
-    body = `<input class="f-num" placeholder="#" inputmode="numeric" style="width:4rem" value="${esc(it.num || "")}">
-            <input class="f-title" placeholder="Hymn title" style="flex:1" value="${esc(it.title || "")}">`;
+    body = `<input class="f-num" list="dl-hymn-nums" placeholder="#" inputmode="numeric" autocomplete="off" style="width:4rem" value="${esc(it.num || "")}">
+            <input class="f-title" list="dl-hymn-titles" placeholder="Hymn title" autocomplete="off" style="flex:1" value="${esc(it.title || "")}">`;
   } else if (SPEAKER_KINDS.includes(it.kind)) {
     body = `<input class="f-name" placeholder="Name" style="flex:1" value="${esc(it.name || "")}">
             <input class="f-topic" placeholder="Topic (optional)" style="flex:1" value="${esc(it.topic || "")}">`;

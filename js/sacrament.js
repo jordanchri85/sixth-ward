@@ -290,7 +290,7 @@ function statusChips(m, date) {
     const clickable = qe && can;
     const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
     const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}>${icon} ${label}${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-icon">${icon}</span> <span class="st-label">${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
   };
 
   // Hymns pill covers 4 slots: opening/sacrament/closing hymns, plus the
@@ -317,9 +317,9 @@ function statusChips(m, date) {
     if (wbOther) parts.push("other");
     // bishopric gets the editable form; members get a read-only view of the same content
     const clickAttr = can ? `data-qe='{"t":"wb"}' title="Click to view or edit"` : `data-wb="${date}" title="Click to view"`;
-    wbChip = `<span class="st st-ok st-click" ${clickAttr}>✓ Ward Business<span class="st-name">${parts.join(" · ")}</span></span>`;
+    wbChip = `<span class="st st-ok st-click" ${clickAttr}><span class="st-icon">✓</span> <span class="st-label">Ward Business</span><span class="st-name">${parts.join(" · ")}</span></span>`;
   } else {
-    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}>○ Ward Business</span>`;
+    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}><span class="st-icon">○</span> <span class="st-label">Ward Business</span></span>`;
   }
 
   const chips = [
@@ -327,7 +327,7 @@ function statusChips(m, date) {
     wbChip,
     chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy),
     chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy),
-    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}>${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"} Hymns ${hymnsFilled}/${hymnsTotal}</span>`,
+    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> <span class="st-label">Hymns ${hymnsFilled}/${hymnsTotal}</span></span>`,
   ];
 
   // one pill per speaker slot, regular speakers numbered

@@ -249,6 +249,15 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 .st-ok { background: #e3f2e8; color: var(--ok); }
 .st-pending { background: var(--pending-soft); color: var(--pending); }
+.st-miss { background: #fbe7e3; color: var(--danger); }
+.st-off { background: #edf0f3; color: var(--ink-soft); }
+.st-click { cursor: pointer; }
+.st-click:hover { filter: brightness(.95); text-decoration: underline; }
+/* icon + name carry the state color (red/amber/green); the label itself
+   stays a neutral dark so "Conducting" doesn't visually fight the name */
+.st-icon { color: inherit; }
+.st-label { color: var(--ink); font-weight: 600; }
+.st-off .st-label, .st-off .st-icon { color: var(--ink-soft); }
 .st-name {
   display: block;
   font-weight: 700; font-size: .8rem;
@@ -256,10 +265,6 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   margin-top: .1rem;
   white-space: normal;
 }
-.st-miss { background: #fbe7e3; color: var(--danger); }
-.st-off { background: #edf0f3; color: var(--ink-soft); }
-.st-click { cursor: pointer; }
-.st-click:hover { filter: brightness(.95); text-decoration: underline; }
 
 /* Ward Business pill inside the table's Conducting cell */
 .wb-pill {

@@ -65,8 +65,9 @@ function defaultItems(type) {
   return [
     mk("announcements", 3), mk("openingHymn", 3), mk("invocation", 2),
     mk("wardBusiness", 3), mk("sacramentHymn", 3), mk("sacrament", 12),
-    mk("youthSpeaker", 5), mk("speaker", 12), mk("intermediateHymn", 3),
-    mk("speaker", 15), mk("closingHymn", 3), mk("benediction", 2),
+    mk("primarySpeaker", 3), mk("youthSpeaker", 5), mk("speaker", 10),
+    mk("intermediateHymn", 3), mk("speaker", 12), mk("closingHymn", 3),
+    mk("benediction", 2),
   ];
 }
 
@@ -218,32 +219,37 @@ function statusChips(m, date) {
   const items = itemsFor(m, date);
   const planned = !!m;
   const of = (k) => items.filter((i) => i.kind === k);
-  const chip = (label, ok) =>
-    `<span class="st ${ok ? "st-ok" : planned ? "st-miss" : "st-off"}">${ok ? "✓" : "○"} ${label}</span>`;
+  // ok + name -> green pill that expands to show the person
+  const chip = (label, ok, name) =>
+    `<span class="st ${ok ? "st-ok" : planned ? "st-miss" : "st-off"}">${ok ? "✓" : "○"} ${label}${ok && name ? `<span class="st-name">${esc(name)}</span>` : ""}</span>`;
 
   const hymns = items.filter((i) => HYMN_KINDS.includes(i.kind));
   const hymnsFilled = hymns.filter((h) => h.num || h.title).length;
+  const inv = of("invocation")[0];
+  const ben = of("benediction")[0];
 
   const chips = [
-    chip("Conducting", !!m?.conducting),
-    chip("Open Prayer", of("invocation").some((i) => i.name)),
-    chip("Close Prayer", of("benediction").some((i) => i.name)),
+    chip("Conducting", !!m?.conducting, m?.conducting),
+    chip("Open Prayer", !!inv?.name, inv?.name),
+    chip("Close Prayer", !!ben?.name, ben?.name),
     chip(`Hymns ${hymnsFilled}/${hymns.length}`, hymns.length > 0 && hymnsFilled === hymns.length),
   ];
 
-  const spk = items.filter((i) => SPEAKER_KINDS.includes(i.kind));
-  if (spk.length) {
-    const done = spk.filter((s) => s.name).length;
-    const parts = [];
-    const cnt = (k, tag) => {
-      const all = of(k), got = all.filter((s) => s.name).length;
-      if (all.length) parts.push(`${tag}${got}/${all.length}`);
-    };
-    cnt("primarySpeaker", "P"); cnt("youthSpeaker", "Y"); cnt("speaker", "S");
-    chips.push(chip(`Speakers ${done}/${spk.length} (${parts.join(" ")})`, done === spk.length));
-  }
+  // one pill per speaker slot, regular speakers numbered
+  const regTotal = of("speaker").length;
+  let sNum = 0;
+  items.forEach((it) => {
+    if (!SPEAKER_KINDS.includes(it.kind)) return;
+    let label = KINDS[it.kind].label;
+    if (it.kind === "speaker") { sNum++; if (regTotal > 1) label = `Speaker ${sNum}`; }
+    chips.push(chip(label, !!it.name, it.name));
+  });
+
+  // musical number: grey when not on the agenda, red when unassigned, green + name when set
   const mus = of("musical");
-  if (mus.length) chips.push(chip("Musical #", mus.some((x) => x.who)));
+  if (mus.length) mus.forEach((x) => chips.push(chip("Musical #", !!x.who, x.who)));
+  else chips.push(`<span class="st st-off">○ Musical #</span>`);
+
   return `<div class="st-row">${chips.join("")}</div>`;
 }
 
@@ -275,6 +281,7 @@ function renderCards(wrap) {
         <div>
           <h3 style="margin:0">${fmtDate(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-inprogress" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
+            ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
           </h3>
           <div class="row-sub">${ordinal(nthSunday(date))} Sunday${planned && total ? ` · ${total} min` : ""}${isConf ? " · no sacrament meeting" : ""}</div>
         </div>
@@ -299,7 +306,8 @@ function viewMeeting(date) {
     return toast("Not planned yet");
   }
   const el = openModal(`
-    <h3>${fmtDate(date, { year: true })} <span class="row-sub">· ${ordinal(nthSunday(date))} Sunday · ${esc(typeLabel(m, date))}</span></h3>
+    <h3>${fmtDate(date, { year: true })} <span class="row-sub">· ${ordinal(nthSunday(date))} Sunday · ${esc(typeLabel(m, date))}</span>
+      ${m.theme ? `<div class="theme-tag" style="margin-top:.2rem">“${esc(m.theme)}”</div>` : ""}</h3>
     ${renderAgendaView(m)}
     <div class="modal-actions">
       <div class="right">
@@ -412,6 +420,7 @@ function renderTable(wrap) {
           ${MEETING_TYPES.map(([k, l]) => `<option value="${k}" ${type === k ? "selected" : ""}>${l}</option>`).join("")}
         </select>
       </td>
+      <td>${isConf ? "" : `<input class="cell-in" data-date="${date}" data-cell="theme" value="${esc(m?.theme || "")}" placeholder="theme" ${dis}>`}</td>
       <td>${isConf ? "" : `
         <select class="cell-sel" data-date="${date}" data-cell="conducting" ${dis}>
           <option value="">—</option>
@@ -439,7 +448,7 @@ function renderTable(wrap) {
       <div class="table-scroll">
         <table class="sheet">
           <thead><tr>
-            <th>Date</th><th>Type</th><th>Conducting</th><th>Opening Hymn</th><th>Opening Prayer</th>
+            <th>Date</th><th>Type</th><th>Theme</th><th>Conducting</th><th>Opening Hymn</th><th>Opening Prayer</th>
             <th>Sacrament Hymn</th><th>Speakers</th><th>Interm. / Musical</th><th>Closing Hymn</th><th>Closing Prayer</th>
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -473,7 +482,7 @@ async function patchMeeting(date, mutate) {
   const type = cur?.type || defaultTypeFor(date);
   const m = cur
     ? JSON.parse(JSON.stringify(cur))
-    : { date, type, customType: "", presiding: "", conducting: "", items: defaultItems(type), notes: "" };
+    : { date, type, customType: "", theme: "", presiding: "", conducting: "", items: defaultItems(type), notes: "" };
   mutate(m);
   m.updatedAt = serverTimestamp();
   try {
@@ -497,6 +506,8 @@ function commitCell(el) {
       const wasUnplanned = !meetings[date];
       m.type = val;
       if (wasUnplanned || (m.items.length === 0 && val !== "conference")) m.items = defaultItems(val);
+    } else if (cell === "theme") {
+      m.theme = val.trim();
     } else if (cell === "conducting") {
       m.conducting = val;
     } else if (cell === "hymn") {
@@ -553,6 +564,9 @@ function editMeeting(date) {
       </label>
       <label class="field" id="mt-custom-wrap" style="${type === "other" ? "" : "display:none"}">Custom name
         <input id="mt-custom" value="${esc(m.customType || "")}">
+      </label>
+      <label class="field full">Theme
+        <input id="mt-theme" placeholder='e.g. "Repentance", "The Restoration"' value="${esc(m.theme || "")}">
       </label>
       <label class="field">Presiding ${personSelect("mt-presiding", m.presiding || "")}</label>
       <label class="field">Conducting ${personSelect("mt-conducting", m.conducting || "")}</label>
@@ -623,6 +637,7 @@ function editMeeting(date) {
       date,
       type: t,
       customType: t === "other" ? el.querySelector("#mt-custom").value.trim() : "",
+      theme: el.querySelector("#mt-theme").value.trim(),
       presiding: readPersonSelect(el, "mt-presiding"),
       conducting: readPersonSelect(el, "mt-conducting"),
       items: t === "conference" ? [] : draft.items,

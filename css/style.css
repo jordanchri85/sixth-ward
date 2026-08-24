@@ -223,6 +223,11 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .conf-card { background: #eceef1; color: var(--ink-soft); box-shadow: none; }
 .conf-card h3 { color: var(--ink-soft); }
 .pill-conf { background: #dde1e6; color: var(--ink-soft); }
+.theme-tag {
+  font-size: .88rem; font-weight: 600; font-style: italic;
+  color: var(--accent);
+  vertical-align: middle;
+}
 
 .st-row { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .55rem; }
 .st {
@@ -231,6 +236,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   white-space: nowrap;
 }
 .st-ok { background: #e3f2e8; color: var(--ok); }
+.st-name {
+  display: block;
+  font-weight: 700; font-size: .8rem;
+  color: #1d5c38;
+  margin-top: .1rem;
+  white-space: normal;
+}
 .st-miss { background: #fbe7e3; color: var(--danger); }
 .st-off { background: #edf0f3; color: var(--ink-soft); }
 

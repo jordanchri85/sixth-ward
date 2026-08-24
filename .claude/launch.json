@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sixth-ward",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8642", "--directory", "/Users/jordan/sixth-ward"],
+      "port": 8642
+    }
+  ]
+}

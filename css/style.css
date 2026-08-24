@@ -217,6 +217,35 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .agenda-view { line-height: 1.65; font-size: .93rem; }
 .agenda-view .ag-label { color: var(--ink-soft); display: inline-block; min-width: 10.5rem; }
 
+/* ===== Agenda item editor ===== */
+.modal.modal-wide { max-width: 44rem; }
+.item-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: .45rem .55rem;
+  margin-bottom: .45rem;
+}
+.item-card.dragging { opacity: .45; }
+.item-head { display: flex; align-items: center; gap: .4rem; }
+.drag-handle {
+  cursor: grab; color: var(--ink-soft);
+  font-size: 1.1rem; padding: 0 .25rem; user-select: none;
+}
+.item-label { font-weight: 600; font-size: .88rem; flex: 1; }
+.item-time { font-size: .8rem; color: var(--ink-soft); white-space: nowrap; }
+.item-time input {
+  width: 3.2rem; font: inherit; font-size: .85rem;
+  border: 1px solid var(--line); border-radius: 6px; padding: .2rem .3rem;
+  text-align: right;
+}
+.item-body { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+.item-body input, .item-body select {
+  font: inherit; font-size: .88rem;
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: .35rem .45rem; min-width: 0;
+}
+
 /* ===== Table (admin) ===== */
 table.simple { width: 100%; border-collapse: collapse; font-size: .92rem; }
 table.simple th { text-align: left; color: var(--ink-soft); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; padding: .5rem .4rem; border-bottom: 2px solid var(--line); }

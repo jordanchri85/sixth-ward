@@ -64,6 +64,12 @@ service cloud.firestore {
         || (isApproved() && resource.data.createdBy == request.auth.uid);
     }
 
+    // ---- Shared settings (bishopric roster, etc.) ----
+    match /settings/{id} {
+      allow read: if isApproved();
+      allow write: if isBishopric();
+    }
+
     // ---- Callings pipeline (sensitive: bishopric only) ----
     match /callings/{id} {
       allow read, write: if isBishopric();

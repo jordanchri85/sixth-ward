@@ -303,6 +303,15 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-weight: 700; font-size: .66rem;
   white-space: normal;
 }
+/* compact Conducting chip up on the date line (frees a slot in the pill row) */
+.cond-inline {
+  display: inline-block;
+  font-size: .78rem; font-weight: 600;
+  padding: .14rem .55rem; border-radius: 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* speaker topic / musical piece under the name */
 .st-sub {
   display: block;
@@ -325,6 +334,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   background: #edf0f3; color: var(--ink-soft);
 }
 .wb-pill.wb-has { background: #e3f2e8; color: var(--ok); }
+.wb-pill.ann-has { background: var(--brand-soft); color: var(--brand); }
 
 /* Confirmed checkbox in quick-edit / editor modals */
 .confirm-field { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }

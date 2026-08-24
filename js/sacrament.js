@@ -2,12 +2,12 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787579599";
-import { ctx, hasRole } from "./app.js?v=1787579599";
+import { db } from "./firebase-init.js?v=1787580734";
+import { ctx, hasRole } from "./app.js?v=1787580734";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787579599";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787580734";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -297,6 +297,17 @@ function wbPillHtml(m, date, canEdit) {
   return `<span class="${cls}${canEdit ? " st-click" : ""}"${clickAttr} title="Ward Business">${has ? "📋 " + parts.join(" · ") : "Ward Business"}</span>`;
 }
 
+// same idea for announcements: grey when none, colored + summarized when present
+function annPillHtml(m, date, canEdit) {
+  const text = itemsFor(m, date).find((i) => i.kind === "announcements")?.text || "";
+  const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
+  const has = lines.length > 0;
+  const cls = has ? "wb-pill ann-has" : "wb-pill";
+  const clickAttr = canEdit ? ` data-date="${date}" data-qe='{"t":"announce"}'` : "";
+  const title = has ? esc(lines.map((l) => "• " + l).join("\n").slice(0, 160)) : "Announcements";
+  return `<span class="${cls}${canEdit ? " st-click" : ""}"${clickAttr} title="${title}">${has ? `📣 ${lines.length} announcement${lines.length > 1 ? "s" : ""}` : "Announcements"}</span>`;
+}
+
 function typeLabel(m, date) {
   const t = m?.type || defaultTypeFor(date);
   if (t === "other" && m?.customType) return m.customType;
@@ -357,7 +368,6 @@ function statusChips(m, date) {
   }
 
   const chips = [
-    chip("Conducting", m?.conducting, { t: "c" }, m?.conductingConfirmed, m?.conductingConfirmedBy),
     wbChip,
     chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org),
     chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org),
@@ -439,6 +449,9 @@ function renderCards(wrap) {
           <path d="M18.5 6a7.5 7.5 0 0 1 0 12"/>
         </svg>
       </button>` : "";
+    const condState = !m?.conducting ? (planned ? "st-miss" : "st-off") : m?.conductingConfirmed ? "st-ok" : "st-pending";
+    const condChip = isConf ? "" : `
+      <span class="cond-inline ${condState}${canEdit ? " st-click" : ""}"${canEdit ? ` data-qe='{"t":"c"}'` : ""}${m?.conductingConfirmed && m?.conductingConfirmedBy ? ` title="Confirmed by ${esc(m.conductingConfirmedBy)}"` : canEdit ? ` title="Click to assign"` : ""}>${m?.conducting ? (m.conductingConfirmed ? "✓" : "●") + " Conducting: " + esc(m.conducting) : "○ Conducting"}</span>`;
     return `
     <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
@@ -446,6 +459,7 @@ function renderCards(wrap) {
           <h3 style="margin:0">${fmtDate(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
+            ${condChip}
           </h3>
           <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${megaphone}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}<span>${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</span></div>
         </div>
@@ -992,7 +1006,8 @@ function renderTable(wrap) {
           ${bishopric.map((n) => `<option value="${esc(n)}" ${m?.conducting === n ? "selected" : ""}>${esc(n)}</option>`).join("")}
           ${m?.conducting && !bishopric.includes(m.conducting) ? `<option value="${esc(m.conducting)}" selected>${esc(m.conducting)}</option>` : ""}
         </select>
-        ${wbPillHtml(m, date, canEdit)}`}
+        ${wbPillHtml(m, date, canEdit)}
+        ${annPillHtml(m, date, canEdit)}`}
       </td>
       <td>${isConf ? "" : `
         <label class="cell-label">Cond.<input class="cell-in" list="dl-conductors" data-date="${date}" data-cell="chorister" value="${esc(m?.chorister || "")}" placeholder="—" ${dis}></label>

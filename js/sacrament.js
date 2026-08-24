@@ -2,12 +2,12 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787578833";
-import { ctx, hasRole } from "./app.js?v=1787578833";
+import { db } from "./firebase-init.js?v=1787579599";
+import { ctx, hasRole } from "./app.js?v=1787579599";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787578833";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787579599";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -318,28 +318,23 @@ function statusChips(m, date) {
   // no name -> grey/red (unassigned); name but not confirmed -> yellow "pending";
   // name + confirmed -> green with a checkmark and a "confirmed by" tooltip.
   // qe -> pill is clickable for quick inline assignment
-  const chip = (label, name, qe, confirmed, confirmedBy, org) => {
+  const chip = (label, name, qe, confirmed, confirmedBy, org, sub) => {
     const hasName = !!name;
     const cls = !hasName ? (planned ? "st-miss" : "st-off") : confirmed ? "st-ok" : "st-pending";
     const clickable = qe && can;
     const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
     const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
     const orgBadge = org ? `<span class="st-org org-${org.toLowerCase().replace(/[^a-z]+/g, "-")}">${esc(org)}</span>` : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${orgBadge}</span>`;
+    const subLine = hasName && sub ? `<span class="st-sub">${esc(sub)}</span>` : "";
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${subLine}${orgBadge}</span>`;
   };
 
-  // Hymns pill covers 4 slots: opening/sacrament/closing hymns, plus the
-  // intermediate slot whether it's currently a hymn or a special musical number.
-  const coreHymns = items.filter((i) => i.kind !== "intermediateHymn" && HYMN_KINDS.includes(i.kind));
-  const coreFilled = coreHymns.filter((h) => h.num || h.title).length;
-  const interItem = items.find((i) => i.kind === "intermediateHymn") || items.find((i) => i.kind === "musical") || items.find((i) => i.kind === "choir");
-  const interFilled = interItem
-    ? interItem.kind === "musical" ? !!interItem.who
-    : interItem.kind === "choir" ? !!interItem.hymn
-    : !!(interItem.num || interItem.title)
-    : false;
-  const hymnsTotal = coreHymns.length + (interItem ? 1 : 0);
-  const hymnsFilled = coreFilled + (interFilled ? 1 : 0);
+  // Hymns pill counts only actual hymn slots; the musical/choir slot gets its own pill
+  const hymnItems = items.filter((i) => HYMN_KINDS.includes(i.kind));
+  const hymnsTotal = hymnItems.length;
+  const hymnsFilled = hymnItems.filter((h) => h.num || h.title).length;
+  const slotMusical = items.find((i) => i.kind === "musical");
+  const slotChoir = items.find((i) => i.kind === "choir");
   const inv = of("invocation")[0];
   const ben = of("benediction")[0];
 
@@ -369,6 +364,16 @@ function statusChips(m, date) {
     `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
+  // Special Musical Number: its own pill right after Hymns.
+  // Clicking opens the Hymns editor, which owns the Hymn/Musical/Choir slot toggle.
+  if (slotMusical) {
+    chips.push(chip("Musical #", slotMusical.who, { t: "h" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn));
+  } else if (slotChoir) {
+    chips.push(chip("Musical #", "Choir", { t: "h" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn));
+  } else {
+    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"h"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Musical #</span></span>`);
+  }
+
   // one pill per speaker slot, regular speakers numbered
   const regTotal = of("speaker").length;
   let sNum = 0;
@@ -379,7 +384,7 @@ function statusChips(m, date) {
     occ[it.kind] = o + 1;
     let label = KINDS[it.kind].label;
     if (it.kind === "speaker") { sNum++; if (regTotal > 1) label = `Speaker ${sNum}`; }
-    chips.push(chip(label, it.name, { t: "i", k: it.kind, o }, it.confirmed, it.confirmedBy));
+    chips.push(chip(label, it.name, { t: "i", k: it.kind, o }, it.confirmed, it.confirmedBy, null, it.topic));
   });
 
   return `<div class="st-row">${chips.join("")}</div>`;

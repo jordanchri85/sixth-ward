@@ -303,6 +303,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-weight: 700; font-size: .66rem;
   white-space: normal;
 }
+/* speaker topic / musical piece under the name */
+.st-sub {
+  display: block;
+  font-weight: 500; font-style: italic; font-size: .68rem;
+  color: inherit; opacity: .8;
+  white-space: normal;
+}
 /* one distinct color per organization */
 .org-relief-society { background: #fce4ec; color: #ad1457; }
 .org-elders-quorum  { background: #e3f2fd; color: #1565c0; }

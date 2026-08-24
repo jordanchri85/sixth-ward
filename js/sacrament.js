@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787583303";
-import { ctx, hasRole } from "./app.js?v=1787583303";
+import { db } from "./firebase-init.js?v=1787583562";
+import { ctx, hasRole } from "./app.js?v=1787583562";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787583303";
-import { HYMNS } from "./hymns.js?v=1787583303";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787583562";
+import { HYMNS } from "./hymns.js?v=1787583562";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 

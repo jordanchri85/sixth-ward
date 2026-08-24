@@ -304,7 +304,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   margin-top: auto;      /* pin to the bottom of the pill */
   padding: .1rem .55rem;
   border-radius: 99px;
-  font-weight: 700; font-size: .66rem;
+  font-weight: 600; font-size: .66rem;
   white-space: normal;
   color: #fff; /* solid badges stay readable on any pill background */
 }
@@ -336,12 +336,12 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   color: inherit; opacity: .8;
   white-space: normal;
 }
-/* one distinct solid color per organization */
-.org-relief-society { background: #c2185b; }
-.org-elders-quorum  { background: #1565c0; }
-.org-primary        { background: #e65100; }
-.org-young-men      { background: #2e7d32; }
-.org-young-women    { background: #6a1b9a; }
+/* one distinct solid color per organization — muted so they don't shout */
+.org-relief-society { background: #cf6d96; }
+.org-elders-quorum  { background: #6b96c9; }
+.org-primary        { background: #dd9257; }
+.org-young-men      { background: #74a67f; }
+.org-young-women    { background: #a37fc0; }
 
 /* Ward Business pill inside the table's Conducting cell */
 .wb-pill {

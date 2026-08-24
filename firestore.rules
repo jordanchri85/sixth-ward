@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Role helpers ----
+    // Roles live in users/{uid}.role: pending -> member -> bishopric -> bishop.
+    // The bishop's email is recognized directly so the app can never lock itself out.
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isBishopEmail() {
+      return signedIn() && request.auth.token.email == 'jordanchri@gmail.com';
+    }
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function isBishop() {
+      return isBishopEmail() || (hasProfile() && role() == 'bishop');
+    }
+    function isBishopric() {
+      return isBishop() || (hasProfile() && role() == 'bishopric');
+    }
+    function isApproved() {
+      return isBishopric() || (hasProfile() && role() == 'member');
+    }
+
+    // ---- Profiles / roles ----
+    match /users/{uid} {
+      // anyone signed in can read their own profile (to learn their role);
+      // approved users can read the roster (names for assignee pickers)
+      allow read: if signedIn() && (request.auth.uid == uid || isApproved());
+      // a new sign-in may only create their own profile, and only as 'pending'
+      // (the bishop's own email may bootstrap itself as bishop)
+      allow create: if signedIn() && request.auth.uid == uid && (
+        request.resource.data.role == 'pending' ||
+        (request.resource.data.role == 'bishop' && isBishopEmail())
+      );
+      // only the bishop assigns roles
+      allow update, delete: if isBishop();
+    }
+
+    // ---- Tasks ----
+    match /tasks/{id} {
+      allow read: if isApproved();
+      allow create, delete: if isBishopric();
+      // members may update tasks assigned to them (e.g. mark done)
+      allow update: if isBishopric()
+        || (isApproved() && resource.data.assigneeUid == request.auth.uid);
+    }
+
+    // ---- Sacrament meeting plans ----
+    match /meetings/{id} {
+      allow read: if isApproved();
+      allow write: if isBishopric();
+    }
+
+    // ---- Calendar events ----
+    match /events/{id} {
+      allow read, create: if isApproved();
+      allow update, delete: if isBishopric()
+        || (isApproved() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // ---- Callings pipeline (sensitive: bishopric only) ----
+    match /callings/{id} {
+      allow read, write: if isBishopric();
+    }
+
+    // ---- Confidential (bishop ONLY) ----
+    match /confidential/{id} {
+      allow read, write: if isBishop();
+    }
+
+    // everything else: denied
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

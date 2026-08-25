@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787584110";
-import { ctx, hasRole } from "./app.js?v=1787584110";
+import { db } from "./firebase-init.js?v=1787618302";
+import { ctx, hasRole } from "./app.js?v=1787618302";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787584110";
-import { HYMNS } from "./hymns.js?v=1787584110";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787618302";
+import { HYMNS } from "./hymns.js?v=1787618302";
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
 
@@ -125,8 +125,8 @@ const SPEAKER_KINDS = ["primarySpeaker", "youthSpeaker", "speaker"];
 const PRAYER_KINDS = ["invocation", "benediction"];
 
 // canonical meeting order, used when the table view adds a missing item
-const CANON = ["announcements", "openingHymn", "invocation", "wardBusiness", "sacramentHymn",
-  "sacrament", "blessing", "babyBlessing", "primarySpeaker", "youthSpeaker", "speaker", "musical",
+const CANON = ["announcements", "openingHymn", "invocation", "wardBusiness", "babyBlessing",
+  "sacramentHymn", "sacrament", "blessing", "primarySpeaker", "youthSpeaker", "speaker", "musical",
   "choir", "intermediateHymn", "testimonies", "closingHymn", "benediction", "custom"];
 
 function defaultItems(type) {
@@ -1118,14 +1118,16 @@ function renderAgendaView(m) {
   if (NO_MEETING(m.type)) {
     return `<div class="row-sub" style="margin-top:.4rem">🏛 ${esc(typeLabel(m, m.date))} — no ward sacrament meeting.${m.notes ? " " + esc(m.notes) : ""}</div>`;
   }
+  // each row: label | value | minutes pinned to the far right column
+  const row = (label, val, time) =>
+    `<div class="ag-row"><span class="ag-label">${esc(label)}:</span><span class="ag-val">${val}</span>${time ? `<span class="ag-time">${time} min</span>` : ""}</div>`;
   const head = [
-    m.presiding ? `<div><span class="ag-label">Presiding:</span> ${esc(m.presiding)}</div>` : "",
-    m.conducting ? `<div><span class="ag-label">Conducting:</span> ${esc(m.conducting)}</div>` : "",
-    m.chorister ? `<div><span class="ag-label">Music conductor:</span> ${esc(m.chorister)}</div>` : "",
-    m.organist ? `<div><span class="ag-label">Organist:</span> ${esc(m.organist)}</div>` : "",
+    m.presiding ? row("Presiding", esc(m.presiding)) : "",
+    m.conducting ? row("Conducting", esc(m.conducting)) : "",
+    m.chorister ? row("Music conductor", esc(m.chorister)) : "",
+    m.organist ? row("Organist", esc(m.organist)) : "",
   ].join("");
   const items = (m.items || []).map((it) => {
-    const t = it.time ? ` <span class="row-sub">(${it.time} min)</span>` : "";
     const label = it.kind === "custom" ? (it.label || "Item") : (KINDS[it.kind]?.label || it.kind);
     let val = "";
     if (HYMN_KINDS.includes(it.kind)) {
@@ -1157,9 +1159,9 @@ function renderAgendaView(m) {
     } else {
       val = esc(it.text || "");
     }
-    return `<div><span class="ag-label">${esc(label)}:</span> ${val}${t}</div>`;
+    return row(label, val, it.time || "");
   }).join("");
-  return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${m.notes ? `<div><span class="ag-label">Notes:</span> ${esc(m.notes)}</div>` : ""}</div>`;
+  return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;
 }
 
 // ===== Table (spreadsheet) view =====

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788119723";
-import { ctx, hasRole } from "./app.js?v=1788119723";
+import { db } from "./firebase-init.js?v=1788120008";
+import { ctx, hasRole } from "./app.js?v=1788120008";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788119723";
-import { HYMNS } from "./hymns.js?v=1788119723";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120008";
+import { HYMNS } from "./hymns.js?v=1788120008";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -881,13 +881,15 @@ function quickEdit(date, q) {
     const inv = nthItem(items, "invocation", 0);
     const ben = nthItem(items, "benediction", 0);
     const sect = (id, label, it) => `
-      <div class="row-sub" style="margin:.7rem 0 .25rem;font-weight:700">${label}</div>
-      <label class="field">Name <input id="qe-${id}-name" value="${esc(it?.name || "")}"></label>
-      <label class="field" style="margin-top:.4rem">Arranged by ${orgSel(`qe-${id}-org`, it?.org || "")}</label>
-      <label class="field confirm-field" style="margin-top:.4rem">
-        <span><input type="checkbox" id="qe-${id}-conf" ${it?.confirmed ? "checked" : ""}> Confirmed</span>
-        ${it?.confirmed && it?.confirmedBy ? `<span class="row-sub confirm-by">Confirmed by ${esc(it.confirmedBy)}</span>` : ""}
-      </label>`;
+      <div class="qe-prayer-sect" data-pid="${id}">
+        <div class="row-sub qe-prayer-head" draggable="true" title="Drag onto the other prayer to swap them" style="margin:.7rem 0 .25rem;font-weight:700"><span class="spk-drag">⠿</span> ${label}</div>
+        <label class="field">Name <input id="qe-${id}-name" value="${esc(it?.name || "")}"></label>
+        <label class="field" style="margin-top:.4rem">Arranged by ${orgSel(`qe-${id}-org`, it?.org || "")}</label>
+        <label class="field confirm-field" style="margin-top:.4rem">
+          <span><input type="checkbox" id="qe-${id}-conf" ${it?.confirmed ? "checked" : ""}> Confirmed</span>
+          ${it?.confirmed && it?.confirmedBy ? `<span class="row-sub confirm-by">Confirmed by ${esc(it.confirmedBy)}</span>` : ""}
+        </label>
+      </div>`;
     html = `<h3>Prayers ${dateLabel}</h3>
       ${sect("inv", "Opening prayer", inv)}
       ${sect("ben", "Closing prayer", ben)}`;
@@ -915,6 +917,7 @@ function quickEdit(date, q) {
     const title = q.t === "py" ? "Youth" : `${KINDS[q.k].label}s`;
     const rowHtml = (s) => `
       <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+        <span class="spk-drag" title="Drag to reorder">⠿</span>
         <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1" value="${esc(s.name || "")}">
         <input class="spk-topic" placeholder="Topic (optional)" autocomplete="off" style="flex:1" value="${esc(s.topic || "")}">
         <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;white-space:nowrap">
@@ -1115,6 +1118,7 @@ function quickEdit(date, q) {
       const wrap = el.querySelector(`.qe-spk-rows[data-kind="${e.target.dataset.spkadd}"]`);
       wrap.insertAdjacentHTML("beforeend", `
         <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+          <span class="spk-drag" title="Drag to reorder">⠿</span>
           <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1">
           <input class="spk-topic" placeholder="Topic (optional)" autocomplete="off" style="flex:1">
           <label style="display:flex;align-items:center;gap:.25rem;font-size:.78rem;white-space:nowrap">
@@ -1124,6 +1128,69 @@ function quickEdit(date, q) {
       wrap.querySelector(".spk-row:last-child .spk-name")?.focus();
     }
     if (e.target.classList.contains("spk-del")) e.target.closest(".spk-row").remove();
+  });
+
+  // drag-and-drop: reorder speaker rows (grab the ⠿ handle; in the Youth
+  // editor rows can also move between the Primary and Youth sections), and
+  // drag one prayer's header onto the other prayer to swap them.
+  let dragRow = null, dragPrayer = false;
+  // rows are only draggable while the handle is held, so the text inputs
+  // inside them keep normal selection behavior (touchstart covers iOS,
+  // where the long-press drag needs draggable set before it begins)
+  const armRow = (e) => {
+    const handle = e.target.closest(".spk-row .spk-drag");
+    if (handle) handle.closest(".spk-row").draggable = true;
+  };
+  el.addEventListener("mousedown", armRow);
+  el.addEventListener("touchstart", armRow, { passive: true });
+  el.addEventListener("dragstart", (e) => {
+    const row = e.target.closest?.(".spk-row");
+    const head = e.target.closest?.(".qe-prayer-head");
+    if (row && row.draggable) { dragRow = row; row.classList.add("dragging"); }
+    else if (head) dragPrayer = true;
+    else return;
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", ""); } catch {}
+  });
+  el.addEventListener("dragover", (e) => {
+    if (dragRow) {
+      const wrap = e.target.closest(".qe-spk-rows") || e.target.closest(".spk-row")?.parentElement;
+      if (!wrap || !wrap.classList.contains("qe-spk-rows")) return;
+      e.preventDefault();
+      const over = e.target.closest(".spk-row");
+      if (over && over !== dragRow) {
+        const r = over.getBoundingClientRect();
+        wrap.insertBefore(dragRow, e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+      } else if (!over && !wrap.contains(dragRow)) {
+        wrap.appendChild(dragRow); // dropped into an empty section
+      }
+    } else if (dragPrayer) {
+      const sect = e.target.closest(".qe-prayer-sect");
+      if (sect) { e.preventDefault(); sect.classList.add("drop-target"); }
+    }
+  });
+  el.addEventListener("dragleave", (e) => {
+    e.target.closest?.(".qe-prayer-sect")?.classList.remove("drop-target");
+  });
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (dragPrayer) {
+      // two fixed slots, so any prayer-to-prayer drop is a swap of the fields
+      el.querySelectorAll(".qe-prayer-sect").forEach((s) => s.classList.remove("drop-target"));
+      if (e.target.closest(".qe-prayer-sect")) {
+        [["name", "value"], ["org", "value"], ["conf", "checked"]].forEach(([f, prop]) => {
+          const a = el.querySelector(`#qe-inv-${f}`), b = el.querySelector(`#qe-ben-${f}`);
+          const t = a[prop]; a[prop] = b[prop]; b[prop] = t;
+        });
+        // the "confirmed by" notes belong to the pre-swap assignments — drop them
+        el.querySelectorAll(".qe-prayer-sect .confirm-by").forEach((s) => s.remove());
+      }
+    }
+  });
+  el.addEventListener("dragend", () => {
+    if (dragRow) { dragRow.classList.remove("dragging"); dragRow.draggable = false; dragRow = null; }
+    dragPrayer = false;
+    el.querySelectorAll(".qe-prayer-sect").forEach((s) => s.classList.remove("drop-target"));
   });
 
   // intermediate slot: Hymn / Special Musical # / Choir toggle

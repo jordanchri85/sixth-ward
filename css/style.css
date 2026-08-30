@@ -292,13 +292,14 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st-off { background: #edf0f3; color: var(--ink-soft); }
 .st-click { cursor: pointer; }
 .st-click:hover { filter: brightness(.95); text-decoration: underline; }
-/* pending outline circle: click to confirm without opening the editor */
-.st-confirm-dot { cursor: pointer; font-weight: 800; }
-.st-confirm-dot:hover { text-shadow: 0 0 1px currentColor; transform: scale(1.25); display: inline-block; }
+/* pending outline circle: click to confirm without opening the editor —
+   kept faint so it doesn't compete with the names; wakes up on hover */
+.st-confirm-dot { cursor: pointer; font-weight: 400; }
+.st-confirm-dot:hover { opacity: 1 !important; transform: scale(1.2); display: inline-block; }
 /* icon + name carry the state color (red/amber/green); the label itself
    stays a neutral dark so "Conducting" doesn't visually fight the name */
-.st-icon { color: inherit; }
-.st-head { color: var(--ink); font-weight: 600; font-size: .71rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.st-icon { color: inherit; opacity: .38; font-weight: 400; font-size: .85em; }
+.st-head { color: var(--ink); font-weight: 700; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .st-off .st-head { color: var(--ink-soft); }
 .st-name {
   display: block;
@@ -339,6 +340,24 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 .cond-inline.cond-empty { color: var(--ink-soft); font-weight: 500; }
 
+/* drag-to-reorder in the group editors */
+.spk-drag {
+  cursor: grab;
+  color: var(--ink-soft);
+  user-select: none; -webkit-user-select: none;
+  touch-action: none;
+  font-size: .85rem;
+  padding: 0 .1rem;
+}
+.spk-drag:active { cursor: grabbing; }
+.spk-row.dragging { opacity: .45; }
+.qe-prayer-head { cursor: grab; }
+.qe-prayer-sect.drop-target {
+  outline: 2px dashed #6b96c9;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* combined pills (Prayers / Youth / Speakers): one line per slot inside the pill */
 .st-group { align-items: stretch; }
 .st-group .st-head { align-self: center; }
@@ -349,7 +368,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-size: .74rem; font-weight: 600;
   margin-top: .12rem;
 }
-.st-line .st-li-ic { flex: 0 0 .8rem; text-align: center; }
+.st-line .st-li-ic { flex: 0 0 .8rem; text-align: center; opacity: .38; font-size: .85em; align-self: center; }
 .st-line .st-li-tag { color: var(--ink); font-weight: 600; font-size: .68rem; white-space: nowrap; }
 .st-off .st-li-tag { color: var(--ink-soft); }
 .st-line .st-li-name {

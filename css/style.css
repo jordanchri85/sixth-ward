@@ -248,6 +248,8 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-size: .84rem;
   line-height: 1.55;
 }
+/* full-width variant: sits on its own line under the row so text doesn't wrap early */
+.agenda-view .ag-detail-full { display: block; width: 100%; margin: .1rem 0 .4rem; }
 .agenda-view .ag-sacrament .ag-clock { margin-left: 0; }
 
 /* ===== Sacrament: cards, status chips, table ===== */

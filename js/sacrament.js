@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788124233";
-import { ctx, hasRole } from "./app.js?v=1788124233";
+import { db } from "./firebase-init.js?v=1788125312";
+import { ctx, hasRole } from "./app.js?v=1788125312";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788124233";
-import { HYMNS } from "./hymns.js?v=1788124233";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125312";
+import { HYMNS } from "./hymns.js?v=1788125312";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1521,6 +1521,7 @@ function renderAgendaView(m, canEdit = false) {
     // primary/youth slots with nobody assigned (or marked none) stay off the agenda
     if ((it.kind === "primarySpeaker" || it.kind === "youthSpeaker") && (it.none || !it.name)) return "";
     let val = "";
+    let extraBelow = ""; // full-width content box rendered under the row
     if (HYMN_KINDS.includes(it.kind)) {
       val = esc([it.num ? "#" + it.num : "", it.title].filter(Boolean).join(" "));
     } else if (SPEAKER_KINDS.includes(it.kind)) {
@@ -1541,20 +1542,16 @@ function renderAgendaView(m, canEdit = false) {
       (it.sustainings || []).forEach((s) => parts.push(`Sustain: ${esc(s.name)}${s.calling ? " — " + esc(s.calling) : ""}`));
       (it.releasings || []).forEach((r) => parts.push(`Release: ${esc(r.name)}${r.calling ? " — " + esc(r.calling) : ""}`));
       if (it.other) parts.push(esc(it.other));
-      val = parts.length
-        ? `<span class="ag-detail-box">${parts.map((p) => `• ${p}`).join("<br>")}</span>`
-        : "";
+      if (parts.length) extraBelow = `<div class="ag-detail-box ag-detail-full">${parts.map((p) => `• ${p}`).join("<br>")}</div>`;
     } else if (it.kind === "announcements") {
       const lines = (it.text || "").split("\n").map((s) => s.trim()).filter(Boolean);
-      val = lines.length
-        ? `<span class="ag-detail-box">${lines.map((l) => `• ${esc(l)}`).join("<br>")}</span>`
-        : "";
+      if (lines.length) extraBelow = `<div class="ag-detail-box ag-detail-full">${lines.map((l) => `• ${esc(l)}`).join("<br>")}</div>`;
     } else {
       val = esc(it.text || "");
     }
     // the closing block (closing hymn + prayer) groups behind its own divider
     const breakBefore = it.kind === "closingHymn" ? `<div class="ag-head-break"></div>` : "";
-    return breakBefore + row(label, val, it.time || "", itemIdx);
+    return breakBefore + row(label, val, it.time || "", itemIdx) + extraBelow;
   }).join("");
   const totalRow = `<div class="ag-row ag-total"><span class="ag-val"></span><span class="ag-clock">ends ~${fmtClock(curClock)}</span><span class="ag-time">${totalMin} min</span></div>`;
   return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${totalRow}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;

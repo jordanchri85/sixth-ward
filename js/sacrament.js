@@ -2,15 +2,26 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1787618302";
-import { ctx, hasRole } from "./app.js?v=1787618302";
+import { db } from "./firebase-init.js?v=1788119091";
+import { ctx, hasRole } from "./app.js?v=1788119091";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1787618302";
-import { HYMNS } from "./hymns.js?v=1787618302";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788119091";
+import { HYMNS } from "./hymns.js?v=1788119091";
+
+
+// dates in this tab are always Sundays — no weekday prefix needed
+function fmtDay(iso, opts = {}) {
+  if (!iso) return "";
+  return new Date(iso + "T12:00:00").toLocaleDateString("en-US", {
+    month: "short", day: "numeric", ...(opts.year ? { year: "numeric" } : {}),
+  });
+}
 
 const ORGS = ["Relief Society", "Elders Quorum", "Primary", "Young Men", "Young Women"];
+// short badge labels for the card pills
+const ORG_ABBR = { "Relief Society": "RS", "Elders Quorum": "EQ", "Primary": "Primary", "Young Men": "YM", "Young Women": "YW" };
 
 const DEFAULT_BISHOPRIC = ["Bishop Christensen", "Brother Bennett", "Brother Beach"];
 let bishopric = [...DEFAULT_BISHOPRIC];
@@ -502,15 +513,21 @@ function statusChips(m, date) {
   // no name -> grey/red (unassigned); name but not confirmed -> yellow "pending";
   // name + confirmed -> green with a checkmark and a "confirmed by" tooltip.
   // qe -> pill is clickable for quick inline assignment
-  const chip = (label, name, qe, confirmed, confirmedBy, org, sub) => {
+  const chip = (label, name, qe, confirmed, confirmedBy, org, sub, confirmTarget) => {
     const hasName = !!name;
     const cls = !hasName ? (planned ? "st-miss" : "st-off") : confirmed ? "st-ok" : "st-pending";
     const clickable = qe && can;
-    const icon = hasName && confirmed ? "✓" : hasName ? "●" : "○";
     const title = hasName && confirmed && confirmedBy ? `Confirmed by ${confirmedBy}` : clickable ? "Click to assign" : "";
-    const orgBadge = org ? `<span class="st-org org-${org.toLowerCase().replace(/[^a-z]+/g, "-")}">${esc(org)}</span>` : "";
+    // pending: an outline circle that confirms on the spot (bishopric only);
+    // clicking anywhere else on the pill still opens the editor
+    const iconHtml = hasName && confirmed
+      ? `<span class="st-icon">✓</span>`
+      : hasName && can && confirmTarget
+      ? `<span class="st-icon st-confirm-dot" data-confirm='${JSON.stringify(confirmTarget)}' title="Click to mark confirmed">○</span>`
+      : `<span class="st-icon">○</span>`;
+    const orgBadge = org ? `<span class="st-org org-${org.toLowerCase().replace(/[^a-z]+/g, "-")}" title="${esc(org)}">${esc(ORG_ABBR[org] || org)}</span>` : "";
     const subLine = hasName && sub ? `<span class="st-sub">${esc(sub)}</span>` : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${subLine}${orgBadge}</span>`;
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head">${iconHtml} ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${subLine}${orgBadge}</span>`;
   };
 
   // Hymns pill counts only actual hymn slots; the musical/choir slot gets its own pill
@@ -524,37 +541,18 @@ function statusChips(m, date) {
   const inv = of("invocation")[0];
   const ben = of("benediction")[0];
 
-  // Ward Business: grey when none entered; green + clickable when there is some
-  const wb = of("wardBusiness");
-  const susCount = wb.reduce((a, b) => a + (b.sustainings?.length || 0), 0);
-  const relCount = wb.reduce((a, b) => a + (b.releasings?.length || 0), 0);
-  const wbOther = wb.some((b) => (b.other || "").trim());
-  let wbChip;
-  if (susCount || relCount || wbOther) {
-    const parts = [];
-    if (susCount) parts.push(`${susCount} sustain`);
-    if (relCount) parts.push(`${relCount} release`);
-    if (wbOther) parts.push("other");
-    // bishopric gets the editable form; members get a read-only view of the same content
-    const clickAttr = can ? `data-qe='{"t":"wb"}' title="Click to view or edit"` : `data-wb="${date}" title="Click to view"`;
-    wbChip = `<span class="st st-ok st-click" ${clickAttr}><span class="st-head"><span class="st-icon">✓</span> Ward Business</span><span class="st-name">${parts.join(" · ")}</span></span>`;
-  } else {
-    wbChip = `<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"wb"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Ward Business</span></span>`;
-  }
-
   const chips = [
-    wbChip,
-    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org),
-    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org),
+    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org, null, { k: "invocation", o: 0 }),
+    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org, null, { k: "benediction", o: 0 }),
     `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
   // Intermediate slot: its own pill right after Hymns, with its own editor
   // (Hymn / Special Musical # / Choir toggle lives there).
   if (slotMusical) {
-    chips.push(chip("Musical #", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn));
+    chips.push(chip("Musical #", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn, { k: "musical", o: 0 }));
   } else if (slotChoir) {
-    chips.push(chip("Musical #", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn));
+    chips.push(chip("Musical #", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn, { k: "choir", o: 0 }));
   } else if (slotInterHymn) {
     const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
     chips.push(chip("Interm. Hymn", hymnVal, { t: "inter" }, true, null));
@@ -578,7 +576,7 @@ function statusChips(m, date) {
     if (list.length <= maxIndividual) {
       list.forEach((it, i) => {
         const label = kind === "speaker" && list.length > 1 ? `Speaker ${i + 1}` : single;
-        chips.push(chip(label, it.name, qe, it.confirmed, it.confirmedBy, null, it.topic));
+        chips.push(chip(label, it.name, qe, it.confirmed, it.confirmedBy, null, null, { k: kind, o: i })); // name only — topic lives in the editor/view
       });
     } else {
       const named = list.filter((s) => s.name).length;
@@ -643,20 +641,38 @@ function renderCards(wrap) {
           <path d="M18.5 6a7.5 7.5 0 0 1 0 12"/>
         </svg>
       </button>` : "";
+    // Ward Business: small clipboard icon beside the megaphone — grey when
+    // empty, green when there's business. Bishopric edits; members view.
+    const wbItems = planned ? (m.items || []).filter((i) => i.kind === "wardBusiness") : [];
+    const wbSus = wbItems.reduce((a, b) => a + (b.sustainings?.length || 0), 0);
+    const wbRel = wbItems.reduce((a, b) => a + (b.releasings?.length || 0), 0);
+    const wbHas = wbSus || wbRel || wbItems.some((b) => (b.other || "").trim());
+    const wbParts = [];
+    if (wbSus) wbParts.push(`${wbSus} sustain`);
+    if (wbRel) wbParts.push(`${wbRel} release`);
+    if (wbItems.some((b) => (b.other || "").trim())) wbParts.push("other");
+    const wbIcon = !isConf && (canEdit || wbHas) ? `
+      <button class="megaphone-btn${wbHas ? " has-wb" : ""}" data-wbicon="${date}" title="${wbHas ? "Ward Business: " + esc(wbParts.join(" · ")) : "Add ward business"}">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="2" width="8" height="4" rx="1"/>
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          <path d="M9 12h6M9 16h6"/>
+        </svg>
+      </button>` : "";
     // conducting is assigned or not — no confirmation step
-    const condState = m?.conducting ? "st-ok" : planned ? "st-miss" : "st-off";
+    // plain text, no pill color — assigned reads quietly on the date line
     const condChip = isConf ? "" : `
-      <span class="cond-inline ${condState}${canEdit ? " st-click" : ""}"${canEdit ? ` data-qe='{"t":"c"}' title="Click to assign"` : ""}>${m?.conducting ? "✓ Conducting: " + esc(m.conducting) : "○ Conducting"}</span>`;
+      <span class="cond-inline${m?.conducting ? "" : " cond-empty"}${canEdit ? " st-click" : ""}"${canEdit ? ` data-qe='{"t":"c"}' title="Click to assign"` : ""}>Conducting: ${m?.conducting ? esc(m.conducting) : "—"}</span>`;
     return `
     <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
         <div>
-          <h3 style="margin:0">${fmtDate(date, { year: true })}
+          <h3 style="margin:0">${fmtDay(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
             ${condChip}
           </h3>
-          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${megaphone}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">👶 Baby Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}<span>${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</span></div>
+          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${megaphone}${wbIcon}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}<span>${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</span></div>
         </div>
         <div style="display:flex;gap:.4rem">
           ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}
@@ -672,8 +688,12 @@ function renderCards(wrap) {
     b.addEventListener("click", (e) => { e.stopPropagation(); editMeeting(b.dataset.edit); }));
   wrap.querySelectorAll("[data-view]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); viewMeeting(b.dataset.view); }));
-  wrap.querySelectorAll("[data-wb]").forEach((el) =>
-    el.addEventListener("click", (e) => { e.stopPropagation(); wbModal(el.dataset.wb); }));
+  wrap.querySelectorAll("[data-wbicon]").forEach((el) =>
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (canEdit) quickEdit(el.dataset.wbicon, { t: "wb" });
+      else wbModal(el.dataset.wbicon);
+    }));
   wrap.querySelectorAll("[data-addbaby]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); quickAddBaby(b.dataset.addbaby); }));
   wrap.querySelectorAll("[data-qe]").forEach((el) =>
@@ -681,12 +701,26 @@ function renderCards(wrap) {
       e.stopPropagation();
       quickEdit(el.closest("[data-date]").dataset.date, JSON.parse(el.dataset.qe));
     }));
+  // pending outline circle: one click marks the item confirmed, no popup
+  wrap.querySelectorAll("[data-confirm]").forEach((el) =>
+    el.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const { k, o } = JSON.parse(el.dataset.confirm);
+      const date = el.closest("[data-date]").dataset.date;
+      await patchMeeting(date, (m) => {
+        const it = nthItem(m.items, k, o);
+        if (it && (it.name || it.who || k === "choir")) {
+          it.confirmed = true;
+          it.confirmedBy = ctx.name;
+        }
+      });
+    }));
 }
 
 // quick "+ Baby" button: always adds a NEW baby blessing item (a Sunday can have more than one)
 function quickAddBaby(date) {
   const el = openModal(`
-    <h3>Add Baby Blessing <span class="row-sub">· ${fmtDate(date, { year: true })}</span></h3>
+    <h3>Add Baby Blessing <span class="row-sub">· ${fmtDay(date, { year: true })}</span></h3>
     <label class="field">Baby's name <input id="qe-baby-name" placeholder="Baby's name"></label>
     <div class="modal-actions">
       <div class="right">
@@ -717,7 +751,7 @@ function quickEdit(date, q) {
   const cur = meetings[date];
   const type = cur?.type || defaultTypeFor(date);
   const items = cur?.items ? cur.items : defaultItems(type);
-  const dateLabel = `<span class="row-sub">· ${fmtDate(date, { year: true })}</span>`;
+  const dateLabel = `<span class="row-sub">· ${fmtDay(date, { year: true })}</span>`;
 
   const orgSel = (id, val) => `
     <select id="${id}"><option value="">Arranged by…</option>
@@ -1075,7 +1109,7 @@ function wbModal(date) {
   const other = wb.map((b) => (b.other || "").trim()).filter(Boolean);
   const line = (p) => `<div>${esc(p.name)}${p.calling ? ` — <span class="row-sub">${esc(p.calling)}</span>` : ""}</div>`;
   const el = openModal(`
-    <h3>Ward Business <span class="row-sub">· ${fmtDate(date, { year: true })}</span></h3>
+    <h3>Ward Business <span class="row-sub">· ${fmtDay(date, { year: true })}</span></h3>
     <div class="agenda-view">
       ${sus.length ? `<div class="mtg-sec-title">Sustainings</div>${sus.map(line).join("")}` : ""}
       ${rel.length ? `<div class="mtg-sec-title" style="margin-top:.7rem">Releasings</div>${rel.map(line).join("")}` : ""}
@@ -1101,7 +1135,7 @@ function viewMeeting(date) {
     return toast("Not planned yet");
   }
   const el = openModal(`
-    <h3>${fmtDate(date, { year: true })} <span class="row-sub">·${nthSunday(date) === 5 ? " 5th Sunday ·" : ""} ${esc(typeLabel(m, date))}</span>
+    <h3>${fmtDay(date, { year: true })} <span class="row-sub">·${nthSunday(date) === 5 ? " 5th Sunday ·" : ""} ${esc(typeLabel(m, date))}</span>
       ${m.theme ? `<div class="theme-tag" style="margin-top:.2rem">“${esc(m.theme)}”</div>` : ""}</h3>
     ${renderAgendaView(m)}
     <div class="modal-actions">
@@ -1279,7 +1313,7 @@ function renderTable(wrap) {
   wrap.innerHTML = `
     <div class="card table-card">
       <div style="text-align:center;margin-bottom:.5rem">
-        <span class="row-sub">${viewYear} · ${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}</span>
+        <span class="row-sub">${viewYear} · ${fmtDay(dates[0])} – ${fmtDay(dates[dates.length - 1])}</span>
       </div>
       <div class="table-scroll">
         <table class="sheet">
@@ -1404,7 +1438,7 @@ function editMeeting(date) {
   };
 
   const el = openModal(`
-    <h3>${fmtDate(date, { year: true })}${nthSunday(date) === 5 ? ` <span class="nth-pill nth-5">5th Sunday</span>` : ""}</h3>
+    <h3>${fmtDay(date, { year: true })}${nthSunday(date) === 5 ? ` <span class="nth-pill nth-5">5th Sunday</span>` : ""}</h3>
     <div class="form-grid two-col">
       <label class="field">Meeting type
         <select id="mt-type">

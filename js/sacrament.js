@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788125312";
-import { ctx, hasRole } from "./app.js?v=1788125312";
+import { db } from "./firebase-init.js?v=1788125517";
+import { ctx, hasRole } from "./app.js?v=1788125517";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125312";
-import { HYMNS } from "./hymns.js?v=1788125312";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125517";
+import { HYMNS } from "./hymns.js?v=1788125517";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1501,8 +1501,8 @@ function renderAgendaView(m, canEdit = false) {
     curClock += mins; totalMin += mins;
     return `<span class="ag-clock">${startsAt}</span><span class="ag-time${canEdit && idx != null ? " ag-tclick" : ""}"${canEdit && idx != null ? ` data-tedit="${idx}" title="Click to change the minutes"` : ""}>${time} min</span>`;
   };
-  const row = (label, val, time, idx) =>
-    `<div class="ag-row"><span class="ag-label">${esc(label)}:</span><span class="ag-val">${val}</span>${time ? timeCell(time, idx) : ""}</div>`;
+  const row = (label, val, time, idx, cls) =>
+    `<div class="ag-row${cls ? " " + cls : ""}"><span class="ag-label">${esc(label)}:</span><span class="ag-val">${val}</span>${time ? timeCell(time, idx) : ""}</div>`;
   const head = [
     m.presiding ? row("Presiding", esc(m.presiding)) : "",
     m.conducting ? row("Conducting", esc(m.conducting)) : "",
@@ -1551,7 +1551,8 @@ function renderAgendaView(m, canEdit = false) {
     }
     // the closing block (closing hymn + prayer) groups behind its own divider
     const breakBefore = it.kind === "closingHymn" ? `<div class="ag-head-break"></div>` : "";
-    return breakBefore + row(label, val, it.time || "", itemIdx) + extraBelow;
+    // sacrament hymn joins the blue administration band as one grouped block
+    return breakBefore + row(label, val, it.time || "", itemIdx, it.kind === "sacramentHymn" ? "ag-sac-hymn" : "") + extraBelow;
   }).join("");
   const totalRow = `<div class="ag-row ag-total"><span class="ag-val"></span><span class="ag-clock">ends ~${fmtClock(curClock)}</span><span class="ag-time">${totalMin} min</span></div>`;
   return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${totalRow}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;

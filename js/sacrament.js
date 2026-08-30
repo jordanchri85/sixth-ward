@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788122369";
-import { ctx, hasRole } from "./app.js?v=1788122369";
+import { db } from "./firebase-init.js?v=1788122875";
+import { ctx, hasRole } from "./app.js?v=1788122875";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122369";
-import { HYMNS } from "./hymns.js?v=1788122369";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122875";
+import { HYMNS } from "./hymns.js?v=1788122875";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -944,6 +944,23 @@ function quickEdit(date, q) {
     const interMode = interChoir ? "choir" : interMusical ? "musical" : "hymn";
     const modeBtn = (mode, label) =>
       `<button class="chip ${interMode === mode ? "active" : ""}" data-inter-mode="${mode}" type="button">${label}</button>`;
+    // where the number lands in the meeting, relative to the adult speakers
+    const SLOT_KINDS_POS = ["intermediateHymn", "musical", "choir"];
+    const spkIdxs = items.map((it, i) => (it.kind === "speaker" ? i : -1)).filter((i) => i >= 0);
+    const slotIdx = items.findIndex((i) => SLOT_KINDS_POS.includes(i.kind));
+    const spkNames = items.filter((i) => i.kind === "speaker").map((s) => s.name);
+    let curPos = "spk:0";
+    if (slotIdx >= 0 && spkIdxs.length) {
+      const before = spkIdxs.filter((i) => i < slotIdx).length;
+      curPos = before === 0 ? "start" : `spk:${before - 1}`;
+    }
+    const posSel = spkIdxs.length ? `
+      <label class="field" style="margin:.6rem 0 .2rem">Position in the meeting
+        <select id="qe-inter-pos">
+          <option value="start" ${curPos === "start" ? "selected" : ""}>Before the speakers</option>
+          ${spkNames.map((n, i) => `<option value="spk:${i}" ${curPos === `spk:${i}` ? "selected" : ""}>After speaker ${i + 1}${n ? ` (${esc(n)})` : ""}</option>`).join("")}
+        </select>
+      </label>` : "";
     html = `<h3>Intermediate ${dateLabel}</h3>
       <div class="chips" style="margin:.3rem 0 .6rem">
         ${modeBtn("hymn", "Hymn")}${modeBtn("musical", "Special Musical #")}${modeBtn("choir", "Choir")}
@@ -968,9 +985,11 @@ function quickEdit(date, q) {
           <input id="qe-inter-choir-piece" autocomplete="off" value="${esc(interChoir?.hymn || "")}">
         </label>
       </div>
+      ${posSel}
       ${hymnDatalists()}`;
     onSave = (el) => {
       const nowMode = el.querySelector("[data-inter-mode].active")?.dataset.interMode || "hymn";
+      const posVal = el.querySelector("#qe-inter-pos")?.value || "";
       const interVal = nowMode === "musical"
         ? { who: el.querySelector("#qe-inter-who").value.trim(), hymn: el.querySelector("#qe-inter-piece").value.trim(), accompanist: el.querySelector("#qe-inter-acc").value.trim() }
         : nowMode === "choir"
@@ -990,6 +1009,20 @@ function quickEdit(date, q) {
         } else {
           const base = targetKind === "intermediateHymn" ? {} : { confirmed: false, confirmedBy: "" };
           insertCanonical(m.items, { kind: targetKind, time, ...base, ...interVal });
+        }
+        // reposition relative to the adult speakers per the Position select
+        if (posVal) {
+          const slot = m.items.find((i) => i.kind === targetKind);
+          m.items = m.items.filter((i) => i !== slot);
+          const spks = m.items.filter((i) => i.kind === "speaker");
+          let at = -1;
+          if (posVal === "start" && spks[0]) at = m.items.indexOf(spks[0]);
+          else if (posVal.startsWith("spk:")) {
+            const anchor = spks[Math.min(Number(posVal.slice(4)), spks.length - 1)];
+            if (anchor) at = m.items.indexOf(anchor) + 1;
+          }
+          if (at < 0) insertCanonical(m.items, slot);
+          else m.items.splice(at, 0, slot);
         }
       };
     };
@@ -1435,11 +1468,19 @@ function renderAgendaView(m) {
   const head = [
     m.presiding ? row("Presiding", esc(m.presiding)) : "",
     m.conducting ? row("Conducting", esc(m.conducting)) : "",
-    m.chorister ? row("Music conductor", esc(m.chorister)) : "",
-    m.organist ? row("Organist", esc(m.organist)) : "",
+    row("Music conductor", m.chorister ? esc(m.chorister) : `<span class="row-sub">—</span>`),
+    row("Organist", m.organist ? esc(m.organist) : `<span class="row-sub">—</span>`),
   ].join("");
   const items = (m.items || []).map((it) => {
     const label = it.kind === "custom" ? (it.label || "Item") : (KINDS[it.kind]?.label || it.kind);
+    // sacrament administration is the meeting's center of gravity — set it
+    // apart (older docs use kind "sacrament", newer defaults "blessing")
+    if (it.kind === "sacrament" || it.kind === "blessing") {
+      const who = it.kind === "blessing" ? [it.priest1, it.priest2].filter(Boolean).join(" & ") : "";
+      return `<div class="ag-row ag-sacrament"><span class="ag-sac-label">${esc(KINDS[it.kind].label)}${who ? ` <span class="ag-sac-who">· ${esc(who)}</span>` : ""}</span>${it.time ? `<span class="ag-time">${it.time} min</span>` : ""}</div>`;
+    }
+    // primary/youth slots with nobody assigned (or marked none) stay off the agenda
+    if ((it.kind === "primarySpeaker" || it.kind === "youthSpeaker") && (it.none || !it.name)) return "";
     let val = "";
     if (HYMN_KINDS.includes(it.kind)) {
       val = esc([it.num ? "#" + it.num : "", it.title].filter(Boolean).join(" "));
@@ -1461,7 +1502,9 @@ function renderAgendaView(m) {
       (it.sustainings || []).forEach((s) => parts.push(`Sustain: ${esc(s.name)}${s.calling ? " — " + esc(s.calling) : ""}`));
       (it.releasings || []).forEach((r) => parts.push(`Release: ${esc(r.name)}${r.calling ? " — " + esc(r.calling) : ""}`));
       if (it.other) parts.push(esc(it.other));
-      val = parts.join("; ");
+      val = parts.length
+        ? `<span style="display:inline-block;vertical-align:top">${parts.join("<br>")}</span>`
+        : "";
     } else if (it.kind === "announcements") {
       const lines = (it.text || "").split("\n").map((s) => s.trim()).filter(Boolean);
       val = lines.length

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788123885";
-import { ctx, hasRole } from "./app.js?v=1788123885";
+import { db } from "./firebase-init.js?v=1788124188";
+import { ctx, hasRole } from "./app.js?v=1788124188";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123885";
-import { HYMNS } from "./hymns.js?v=1788123885";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788124188";
+import { HYMNS } from "./hymns.js?v=1788124188";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1479,12 +1479,6 @@ function viewMeeting(date) {
       const idx = Number(t.dataset.tedit);
       inlineNum(t, meetings[date]?.items?.[idx]?.time ?? "", "width:3.2rem;font:inherit;font-size:.8rem;padding:.05rem .2rem;border:1px solid var(--line);border-radius:4px",
         (v) => patchMeeting(date, (mm) => { if (mm.items[idx]) mm.items[idx].time = Math.max(0, Number(v) || 0); }));
-      return;
-    }
-    const s = e.target.closest("[data-startedit]");
-    if (s && !s.querySelector("input")) {
-      inlineNum(s, meetings[date]?.startTime || "9:00", "width:4.2rem;font:inherit;font-size:.85rem;padding:.05rem .25rem;border:1px solid var(--line);border-radius:4px",
-        (v) => patchMeeting(date, (mm) => { mm.startTime = /^\d{1,2}:\d{2}$/.test(v) ? v : "9:00"; }));
     }
   });
 }
@@ -1514,7 +1508,7 @@ function renderAgendaView(m, canEdit = false) {
     m.conducting ? row("Conducting", esc(m.conducting)) : "",
     row("Music conductor", m.chorister ? esc(m.chorister) : `<span class="row-sub">—</span>`),
     row("Organist", m.organist ? esc(m.organist) : `<span class="row-sub">—</span>`),
-    `<div class="ag-row"><span class="ag-label">Starts at:</span><span class="ag-val"><span${canEdit ? ` class="st-click" data-startedit title="Click to change the start time"` : ""}>${esc(startStr)}</span></span></div>`,
+    `<div class="ag-head-break"></div>`,
   ].join("");
   const items = (m.items || []).map((it, itemIdx) => {
     const label = it.kind === "custom" ? (it.label || "Item") : (KINDS[it.kind]?.label || it.kind);
@@ -1558,7 +1552,9 @@ function renderAgendaView(m, canEdit = false) {
     } else {
       val = esc(it.text || "");
     }
-    return row(label, val, it.time || "", itemIdx);
+    // the closing block (closing hymn + prayer) groups behind its own divider
+    const breakBefore = it.kind === "closingHymn" ? `<div class="ag-head-break"></div>` : "";
+    return breakBefore + row(label, val, it.time || "", itemIdx);
   }).join("");
   const totalRow = `<div class="ag-row ag-total"><span class="ag-label">Total:</span><span class="ag-val"></span><span class="ag-clock">ends ~${fmtClock(curClock)}</span><span class="ag-time">${totalMin} min</span></div>`;
   return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${totalRow}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;

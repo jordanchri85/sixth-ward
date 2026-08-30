@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788120740";
-import { ctx, hasRole } from "./app.js?v=1788120740";
+import { db } from "./firebase-init.js?v=1788120890";
+import { ctx, hasRole } from "./app.js?v=1788120890";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120740";
-import { HYMNS } from "./hymns.js?v=1788120740";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120890";
+import { HYMNS } from "./hymns.js?v=1788120890";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -686,9 +686,9 @@ function renderCards(wrap) {
           <h3 style="margin:0">${fmtDay(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
-            ${megaphone}${wbIcon}
+            ${megaphone}${wbIcon}${nth === 5 ? `<span class="nth-pill nth-5 head-pill">5th Sunday</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold head-pill">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}
           </h3>
-          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
+          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
         </div>
         <div style="display:flex;gap:.4rem">
           ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}

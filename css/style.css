@@ -256,6 +256,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   vertical-align: middle; /* icons sit inline on the date headline */
 }
 .megaphone-btn:hover { background: #dfe3e7; }
+/* pills that ride the date headline (5th Sunday, Blessing) match the icon-button height */
+.head-pill {
+  display: inline-flex; align-items: center;
+  height: 1.6rem;
+  vertical-align: middle;
+  line-height: 1;
+}
 .megaphone-btn.has-announce { background: var(--brand-soft); color: var(--brand); }
 .megaphone-btn.has-announce:hover { background: #dbe7f2; }
 .megaphone-btn.has-wb { background: #e3f2e8; color: var(--ok); }

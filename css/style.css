@@ -231,7 +231,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .agenda-view .ag-sac-hymn:has(+ .ag-sacrament) { border-radius: 6px 6px 0 0; padding-bottom: .1rem; }
 .agenda-view .ag-sac-hymn + .ag-sacrament { border-radius: 0 0 6px 6px; margin-top: 0; }
 .agenda-view .ag-sacrament .ag-time, .agenda-view .ag-sac-hymn .ag-time { padding-right: .4rem; }
-.agenda-view .ag-sac-label { flex: 1; text-align: center; font-weight: 700; color: var(--brand); }
+/* label centers on the full row width — the time columns overlay at the right */
+.agenda-view .ag-sacrament { position: relative; justify-content: flex-end; }
+.agenda-view .ag-sac-label {
+  position: absolute; left: 0; right: 0;
+  text-align: center; font-weight: 700; color: var(--brand);
+  pointer-events: none;
+}
 .agenda-view .ag-sacrament .ag-time { margin-left: 0; padding-right: .4rem; }
 .agenda-view .ag-sac-who { font-weight: 500; color: var(--ink-soft); }
 /* wall-clock chip before the minutes; minutes are click-to-edit for bishopric */

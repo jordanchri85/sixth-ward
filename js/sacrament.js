@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788120008";
-import { ctx, hasRole } from "./app.js?v=1788120008";
+import { db } from "./firebase-init.js?v=1788120186";
+import { ctx, hasRole } from "./app.js?v=1788120186";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120008";
-import { HYMNS } from "./hymns.js?v=1788120008";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120186";
+import { HYMNS } from "./hymns.js?v=1788120186";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -533,8 +533,6 @@ function statusChips(m, date) {
   // Hymns pill counts only actual hymn slots; the musical/choir slot gets its own pill
   // Hymns pill = only the fixed hymns; the intermediate slot is its own pill
   const hymnItems = items.filter((i) => HYMN_KINDS.includes(i.kind) && i.kind !== "intermediateHymn");
-  const hymnsTotal = hymnItems.length;
-  const hymnsFilled = hymnItems.filter((h) => h.num || h.title).length;
   const slotInterHymn = items.find((i) => i.kind === "intermediateHymn");
   const slotMusical = items.find((i) => i.kind === "musical");
   const slotChoir = items.find((i) => i.kind === "choir");
@@ -565,12 +563,19 @@ function statusChips(m, date) {
   }));
   const adultSpk = of("speaker");
 
+  // hymn lines: a filled hymn counts as "confirmed" so the line gets a ✓
+  // and the pill turns green once all three are chosen
+  const HYMN_TAGS = { openingHymn: "Open", sacramentHymn: "Sacrament", closingHymn: "Closing" };
   const chips = [
     groupChip("Prayers", { t: "prayers" }, [
       { tag: "Open", name: inv?.name, org: inv?.org, confirmed: inv?.confirmed, confirmedBy: inv?.confirmedBy, k: "invocation", o: 0 },
       { tag: "Closing", name: ben?.name, org: ben?.org, confirmed: ben?.confirmed, confirmedBy: ben?.confirmedBy, k: "benediction", o: 0 },
     ]),
-    `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
+    groupChip("Hymns", { t: "h" }, hymnItems.map((h) => ({
+      tag: HYMN_TAGS[h.kind] || KINDS[h.kind]?.label || h.kind,
+      name: [h.num ? "#" + h.num : "", h.title].filter(Boolean).join(" "),
+      confirmed: !!(h.num || h.title),
+    }))),
   ];
 
   // Intermediate slot: its own pill right after Hymns, with its own editor

@@ -277,12 +277,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .3rem; margin-top: .55rem; }
 .st {
   font-size: .74rem; font-weight: 600;
-  padding: .16rem .3rem .3rem; border-radius: 6px;
+  padding: 0 .3rem .3rem; border-radius: 6px;
   white-space: normal;
   min-width: 0;
   text-align: center;
   line-height: 1.25;
   display: flex; flex-direction: column; align-items: center;
+  overflow: hidden; /* keeps the header band inside the rounded corners */
 }
 @media (max-width: 900px) {
   .st-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -300,7 +301,17 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 /* icon + name carry the state color (red/amber/green); the label itself
    stays a neutral dark so "Conducting" doesn't visually fight the name */
 .st-icon { color: inherit; opacity: .25; font-weight: 400; font-size: .85em; }
-.st-head { color: var(--ink); font-weight: 700; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* title row reads as a header band: full-width darker strip across the pill top */
+.st-head {
+  color: var(--ink); font-weight: 700; font-size: .82rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  align-self: stretch;
+  margin: 0 -.3rem .2rem;
+  padding: .2rem .35rem;
+  background: rgba(31, 39, 51, .07);
+  border-bottom: 1px solid rgba(31, 39, 51, .05);
+  text-align: center;
+}
 .st-off .st-head { color: var(--ink-soft); }
 .st-name {
   display: block;
@@ -360,7 +371,6 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 
 /* combined pills (Prayers / Youth / Speakers): one line per slot inside the pill */
 .st-group { align-items: stretch; }
-.st-group .st-head { align-self: center; }
 /* small centered note under a group-pill headline (e.g. Organ / Conduct on Hymns) */
 .st-subhead {
   align-self: center;

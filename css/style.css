@@ -361,6 +361,14 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 /* combined pills (Prayers / Youth / Speakers): one line per slot inside the pill */
 .st-group { align-items: stretch; }
 .st-group .st-head { align-self: center; }
+/* small centered note under a group-pill headline (e.g. Organ / Conduct on Hymns) */
+.st-subhead {
+  align-self: center;
+  font-size: .64rem; font-weight: 400;
+  color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
 .st-line {
   display: flex; align-items: baseline; gap: .25rem;
   width: 100%; min-width: 0;

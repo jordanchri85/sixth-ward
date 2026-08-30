@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788120494";
-import { ctx, hasRole } from "./app.js?v=1788120494";
+import { db } from "./firebase-init.js?v=1788120604";
+import { ctx, hasRole } from "./app.js?v=1788120604";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120494";
-import { HYMNS } from "./hymns.js?v=1788120494";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120604";
+import { HYMNS } from "./hymns.js?v=1788120604";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -543,7 +543,7 @@ function statusChips(m, date) {
   // combined pill: a headline plus one line per slot, each line with its own
   // click-to-confirm dot. Green when every slot is named AND confirmed,
   // yellow once anything is named, red/grey when empty.
-  const groupChip = (label, qe, lines) => {
+  const groupChip = (label, qe, lines, subhead) => {
     const named = lines.filter((l) => l.name);
     const allDone = lines.length > 0 && named.length === lines.length && lines.every((l) => l.confirmed);
     const cls = named.length === 0 ? (planned ? "st-miss" : "st-off") : allDone ? "st-ok" : "st-pending";
@@ -558,7 +558,7 @@ function statusChips(m, date) {
     }).join("");
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks
-    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${body}</span>`;
+    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${subhead ? `<span class="st-subhead">${subhead}</span>` : ""}${body}</span>`;
   };
 
   const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
@@ -578,20 +578,20 @@ function statusChips(m, date) {
       tag: HYMN_TAGS[h.kind] || KINDS[h.kind]?.label || h.kind,
       name: [h.num ? "#" + h.num : "", h.title].filter(Boolean).join(" "),
       confirmed: !!(h.num || h.title),
-    }))),
+    })), `Organ: ${esc(m?.organist || "—")} · Conduct: ${esc(m?.chorister || "—")}`),
   ];
 
   // Intermediate slot: its own pill right after Hymns, with its own editor
   // (Hymn / Special Musical # / Choir toggle lives there).
   if (slotMusical) {
-    chips.push(chip("Musical #", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn, { k: "musical", o: 0 }));
+    chips.push(chip("Music Number", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn, { k: "musical", o: 0 }));
   } else if (slotChoir) {
-    chips.push(chip("Musical #", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn, { k: "choir", o: 0 }));
+    chips.push(chip("Music Number", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn, { k: "choir", o: 0 }));
   } else if (slotInterHymn) {
     const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
-    chips.push(chip("Interm. Hymn", hymnVal, { t: "inter" }, true, null));
+    chips.push(chip("Music Number", hymnVal, { t: "inter" }, true, null));
   } else {
-    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head">Interm. / Musical</span></span>`);
+    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head">Music Number</span></span>`);
   }
 
   // Youth pill = primary + youth speakers; Speakers pill = the adult speakers.

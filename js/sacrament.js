@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788123205";
-import { ctx, hasRole } from "./app.js?v=1788123205";
+import { db } from "./firebase-init.js?v=1788123524";
+import { ctx, hasRole } from "./app.js?v=1788123524";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123205";
-import { HYMNS } from "./hymns.js?v=1788123205";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123524";
+import { HYMNS } from "./hymns.js?v=1788123524";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -570,9 +570,7 @@ function statusChips(m, date) {
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks
     const sh = subhead ? (typeof subhead === "string" ? { html: subhead, attrs: "" } : subhead) : null;
-    // pills without a subhead keep an invisible one so every pill's first
-    // line sits on the same horizontal row across the card
-    const shHtml = sh ? `<span class="st-subhead"${sh.attrs}>${sh.html}</span>` : `<span class="st-subhead st-subhead-empty">&nbsp;</span>`;
+    const shHtml = sh ? `<span class="st-subhead"${sh.attrs}>${sh.html}</span>` : "";
     return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${shHtml}${body}${footer || ""}</span>`;
   };
 

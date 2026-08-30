@@ -413,8 +413,9 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st-line .st-in-num { width: 2.7rem; flex: none; }
 .st-line .st-in-title { flex: 1; }
 
-/* invisible subhead spacer: keeps every pill's first line on the same row */
-.st-subhead-empty { visibility: hidden; }
+/* content below the header band centers vertically in the pill */
+.st .st-head + * { margin-top: auto; }
+.st > :last-child { margin-bottom: auto; }
 
 /* a "none this week" line reads quiet — it isn't missing, it's decided */
 .st-line .st-none { font-style: italic; font-weight: 500; opacity: .6; }

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788121529";
-import { ctx, hasRole } from "./app.js?v=1788121529";
+import { db } from "./firebase-init.js?v=1788122173";
+import { ctx, hasRole } from "./app.js?v=1788122173";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788121529";
-import { HYMNS } from "./hymns.js?v=1788121529";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122173";
+import { HYMNS } from "./hymns.js?v=1788122173";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -554,15 +554,22 @@ function statusChips(m, date) {
         ? `<span class="st-li-ic st-confirm-dot" data-confirm='${JSON.stringify({ k: l.k, o: l.o })}' title="Click to mark confirmed">○</span>`
         : `<span class="st-li-ic"></span>`;
       const orgTag = l.org ? ` <span class="st-li-org">${esc(ORG_ABBR[l.org] || l.org)}</span>` : "";
-      return `<span class="st-line">${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
+      // inlineEdit lines edit in place on click instead of opening the popup
+      const editAttr = l.inlineEdit && can ? ` data-ed='${JSON.stringify(l.inlineEdit)}' title="Click to type here"` : "";
+      return `<span class="st-line"${editAttr}>${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
     }).join("");
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks
-    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${subhead ? `<span class="st-subhead">${subhead}</span>` : ""}${body}${footer || ""}</span>`;
+    const sh = subhead ? (typeof subhead === "string" ? { html: subhead, attrs: "" } : subhead) : null;
+    // pills without a subhead keep an invisible one so every pill's first
+    // line sits on the same horizontal row across the card
+    const shHtml = sh ? `<span class="st-subhead"${sh.attrs}>${sh.html}</span>` : `<span class="st-subhead st-subhead-empty">&nbsp;</span>`;
+    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${shHtml}${body}${footer || ""}</span>`;
   };
 
   const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
     tag: tagFn(it, i), name: it.name, confirmed: it.confirmed, confirmedBy: it.confirmedBy, k: kind, o: i,
+    inlineEdit: { t: "name", k: kind, o: i },
   }));
   const adultSpk = of("speaker");
 
@@ -571,14 +578,18 @@ function statusChips(m, date) {
   const HYMN_TAGS = { openingHymn: "Open", sacramentHymn: "Sacrament", closingHymn: "Closing" };
   const chips = [
     groupChip("Prayers", { t: "prayers" }, [
-      { tag: "Open", name: inv?.name, org: inv?.org, confirmed: inv?.confirmed, confirmedBy: inv?.confirmedBy, k: "invocation", o: 0 },
-      { tag: "Closing", name: ben?.name, org: ben?.org, confirmed: ben?.confirmed, confirmedBy: ben?.confirmedBy, k: "benediction", o: 0 },
+      { tag: "Open", name: inv?.name, org: inv?.org, confirmed: inv?.confirmed, confirmedBy: inv?.confirmedBy, k: "invocation", o: 0, inlineEdit: { t: "name", k: "invocation", o: 0 } },
+      { tag: "Closing", name: ben?.name, org: ben?.org, confirmed: ben?.confirmed, confirmedBy: ben?.confirmedBy, k: "benediction", o: 0, inlineEdit: { t: "name", k: "benediction", o: 0 } },
     ]),
     groupChip("Hymns", { t: "h" }, hymnItems.map((h) => ({
       tag: HYMN_TAGS[h.kind] || KINDS[h.kind]?.label || h.kind,
       name: [h.num ? "#" + h.num : "", h.title].filter(Boolean).join(" "),
       confirmed: !!(h.num || h.title),
-    })), `Organ: ${esc(m?.organist || "—")} · Conduct: ${esc(m?.chorister || "—")}`),
+      inlineEdit: { t: "hymn", k: h.kind, o: 0 },
+    })), {
+      html: `Organ: ${esc(m?.organist || "—")} · Conduct: ${esc(m?.chorister || "—")}`,
+      attrs: can ? ` data-musiced title="Click to set organist & conductor"` : "",
+    }),
   ];
 
   // Intermediate slot: its own pill right after Hymns, with its own editor
@@ -701,7 +712,7 @@ function renderCards(wrap) {
       </div>
       ${statusChips(m, date)}
     </div>`;
-  }).join("") + musicDatalists();
+  }).join("") + musicDatalists() + hymnDatalists();
 
   wrap.querySelectorAll("[data-edit]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); editMeeting(b.dataset.edit); }));
@@ -732,6 +743,95 @@ function renderCards(wrap) {
           it.confirmed = true;
           it.confirmedBy = ctx.name;
         }
+      });
+    }));
+  // pill lines edit in place: click swaps the line for inputs (hymn lines get
+  // the #/title pair with datalist autofill; prayer/speaker lines a name box);
+  // Enter or clicking away saves, Esc cancels
+  const wireInline = (line, inputs, commitFn) => {
+    let done = false;
+    const commit = () => { if (done) return; done = true; commitFn(); };
+    inputs.forEach((inp) => {
+      inp.addEventListener("click", (ev) => ev.stopPropagation());
+      inp.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+        if (ev.key === "Escape") { ev.preventDefault(); done = true; render(); }
+      });
+    });
+    // save once focus leaves the line (delayed so tabbing between inputs survives)
+    line.addEventListener("focusout", () => {
+      setTimeout(() => { if (!done && !line.contains(document.activeElement)) commit(); }, 120);
+    });
+  };
+  wrap.querySelectorAll("[data-ed]").forEach((line) =>
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (line.querySelector("input")) return; // already editing
+      const ed = JSON.parse(line.dataset.ed);
+      const { k, o } = ed;
+      const date = line.closest("[data-date]").dataset.date;
+      const it = nthItem(itemsFor(meetings[date], date), k, o);
+      const tagHtml = line.querySelector(".st-li-tag")?.outerHTML || "";
+      if (ed.t === "hymn") {
+        const sac = k === "sacramentHymn";
+        line.innerHTML = `${tagHtml}
+          <input class="hymn-num st-in-num" list="${sac ? "dl-sac-hymn-nums" : "dl-hymn-nums"}" placeholder="#" inputmode="numeric" autocomplete="off" value="${esc(it?.num || "")}">
+          <input class="hymn-title st-in-title" list="${sac ? "dl-sac-hymn-titles" : "dl-hymn-titles"}" placeholder="Hymn title" autocomplete="off" value="${esc(it?.title || "")}">`;
+        const numIn = line.querySelector(".hymn-num"), titleIn = line.querySelector(".hymn-title");
+        wireHymnAutofill(numIn, titleIn);
+        numIn.focus();
+        wireInline(line, [numIn, titleIn], () => patchMeeting(date, (mm) => {
+          let t = nthItem(mm.items, k, o);
+          if (!t) { t = blankItem(k, 3); insertCanonical(mm.items, t); }
+          t.num = numIn.value.trim();
+          t.title = titleIn.value.trim();
+        }));
+      } else {
+        // name line (prayers / youth / speakers)
+        line.innerHTML = `${tagHtml} <input class="st-in-title" autocomplete="off" placeholder="Name" value="${esc(it?.name || "")}">`;
+        const nameIn = line.querySelector("input");
+        nameIn.focus();
+        wireInline(line, [nameIn], () => patchMeeting(date, (mm) => {
+          let t = nthItem(mm.items, k, o);
+          if (!t) { t = blankItem(k); insertCanonical(mm.items, t); }
+          const newName = nameIn.value.trim();
+          if (newName !== (it?.name || "")) { t.confirmed = false; t.confirmedBy = ""; } // a different person isn't confirmed yet
+          t.name = newName;
+        }));
+      }
+    }));
+  // organist / conductor edit in place on the Hymns subhead: settings lists
+  // feed the dropdowns (datalists), custom names can be typed freely
+  wrap.querySelectorAll("[data-musiced]").forEach((sh) =>
+    sh.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (sh.querySelector("input")) return;
+      const date = sh.closest("[data-date]").dataset.date;
+      const m = meetings[date];
+      sh.classList.add("st-sh-editing");
+      sh.innerHTML = `
+        <span class="st-music-row">Organ: <input class="st-in-title" list="dl-organists" autocomplete="off" placeholder="Name" value="${esc(m?.organist || "")}"></span>
+        <span class="st-music-row">Conduct: <input class="st-in-title" list="dl-conductors" autocomplete="off" placeholder="Name" value="${esc(m?.chorister || "")}"></span>`;
+      const [orgIn, condIn] = sh.querySelectorAll("input");
+      orgIn.focus();
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        patchMeeting(date, (mm) => {
+          mm.organist = orgIn.value.trim();
+          mm.chorister = condIn.value.trim();
+        });
+      };
+      [orgIn, condIn].forEach((inp) => {
+        inp.addEventListener("click", (ev) => ev.stopPropagation());
+        inp.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+          if (ev.key === "Escape") { ev.preventDefault(); done = true; render(); }
+        });
+      });
+      sh.addEventListener("focusout", () => {
+        setTimeout(() => { if (!done && !sh.contains(document.activeElement)) commit(); }, 120);
       });
     }));
 }
@@ -854,11 +954,8 @@ function quickEdit(date, q) {
         </label>
       </div>
       <div id="qe-inter-choir-fields" style="display:${interMode === "choir" ? "block" : "none"}">
-        <label class="field" style="margin-bottom:.4rem">Hymn name
+        <label class="field">Hymn name
           <input id="qe-inter-choir-piece" autocomplete="off" value="${esc(interChoir?.hymn || "")}">
-        </label>
-        <label class="field">Accompanist
-          <input id="qe-inter-choir-acc" autocomplete="off" value="${esc(interChoir?.accompanist || "")}">
         </label>
       </div>
       ${hymnDatalists()}`;
@@ -867,7 +964,7 @@ function quickEdit(date, q) {
       const interVal = nowMode === "musical"
         ? { who: el.querySelector("#qe-inter-who").value.trim(), hymn: el.querySelector("#qe-inter-piece").value.trim(), accompanist: el.querySelector("#qe-inter-acc").value.trim() }
         : nowMode === "choir"
-        ? { hymn: el.querySelector("#qe-inter-choir-piece").value.trim(), accompanist: el.querySelector("#qe-inter-choir-acc").value.trim() }
+        ? { hymn: el.querySelector("#qe-inter-choir-piece").value.trim() }
         : { num: el.querySelector("#qe-inter-num").value.trim(), title: el.querySelector("#qe-inter-title").value.trim() };
       return (m) => {
         // swap the intermediate slot between an intermediateHymn / musical / choir item
@@ -960,9 +1057,16 @@ function quickEdit(date, q) {
       return (m) => {
         byKind.forEach(({ kind, rows }) => {
           const existing = m.items.filter((i) => i.kind === kind);
-          rows.forEach((r, i) => {
-            let it = existing[i];
-            if (!it) { it = blankItem(kind); insertCanonical(m.items, it); }
+          let used = 0; // rows consumed against existing slots
+          rows.forEach((r) => {
+            let it = existing[used];
+            if (!it) {
+              // a brand-new row only becomes a slot if something was entered —
+              // opening via "+" and saving untouched must not add ghost slots
+              if (!r.name && !r.topic && !r.confirmed) return;
+              it = blankItem(kind); insertCanonical(m.items, it);
+            }
+            used++;
             const wasConfirmed = it.confirmed;
             it.name = r.name; it.topic = r.topic;
             it.confirmed = r.confirmed;
@@ -1483,6 +1587,12 @@ function renderTable(wrap) {
 
 // insert a table-created item at its canonical spot in the agenda
 function insertCanonical(items, it) {
+  // siblings stay together: a new item of a kind that already exists lands
+  // right after the last one (default agendas put the intermediate hymn
+  // between speakers, so a rank-based insert would split the speaker list)
+  let last = -1;
+  items.forEach((x, i) => { if (x.kind === it.kind) last = i; });
+  if (last >= 0) { items.splice(last + 1, 0, it); return; }
   const r = CANON.indexOf(it.kind);
   let idx = items.findIndex((x) => CANON.indexOf(x.kind) > r);
   if (idx < 0) idx = items.length;

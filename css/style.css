@@ -381,23 +381,56 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 /* the Sunday date: larger than the headline pills, with breathing room after it */
 .card-date {
   font-size: 1.28rem;
-  margin-right: .55rem;
+  margin-right: .25rem;
   vertical-align: middle;
 }
+/* even spacing between everything riding the date headline */
+#sunday-list .card h3 .megaphone-btn,
+#sunday-list .card h3 .head-pill,
+#sunday-list .card h3 .theme-tag { margin-left: .35rem; }
 
-/* quick-add "+" pinned under the last line of a group pill (Speakers) */
-.st-add {
-  align-self: center;
-  margin-top: .18rem;
-  width: 1.05rem; height: 1.05rem;
-  border-radius: 50%;
-  background: rgba(31, 39, 51, .08);
-  color: var(--ink-soft);
-  font-weight: 700; font-size: .8rem; line-height: 1;
-  cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
+/* inline hymn editing right in the pill line */
+.st-line[data-hymned] .st-li-name { cursor: pointer; }
+.st-line .st-in-num, .st-line .st-in-title {
+  font: inherit; font-size: .72rem;
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: .08rem .3rem;
+  min-width: 0;
+  background: #fff; color: var(--ink);
 }
-.st-add:hover { background: rgba(31, 39, 51, .16); color: var(--ink); }
+.st-line .st-in-num { width: 2.7rem; flex: none; }
+.st-line .st-in-title { flex: 1; }
+
+/* invisible subhead spacer: keeps every pill's first line on the same row */
+.st-subhead-empty { visibility: hidden; }
+
+/* organist / conductor inline editing on the Hymns subhead */
+.st-subhead[data-musiced] { cursor: pointer; }
+.st-subhead.st-sh-editing {
+  white-space: normal; overflow: visible;
+  display: flex; flex-direction: column; gap: .15rem;
+  align-self: stretch;
+}
+.st-music-row { display: flex; align-items: center; gap: .25rem; width: 100%; }
+.st-music-row input {
+  flex: 1; min-width: 0;
+  font: inherit; font-size: .68rem;
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: .08rem .3rem;
+  background: #fff; color: var(--ink);
+}
+
+/* quick-add "+" under the last line of a group pill (Speakers): plain glyph,
+   left-aligned with the line labels */
+.st-add {
+  align-self: flex-start;
+  margin-top: .12rem;
+  padding-left: 1.05rem;
+  color: var(--ink-soft);
+  font-weight: 700; font-size: .85rem; line-height: 1;
+  cursor: pointer;
+}
+.st-add:hover { color: var(--ink); }
 
 /* small centered note under a group-pill headline (e.g. Organ / Conduct on Hymns) */
 .st-subhead {

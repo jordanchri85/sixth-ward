@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788122875";
-import { ctx, hasRole } from "./app.js?v=1788122875";
+import { db } from "./firebase-init.js?v=1788123205";
+import { ctx, hasRole } from "./app.js?v=1788123205";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122875";
-import { HYMNS } from "./hymns.js?v=1788122875";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123205";
+import { HYMNS } from "./hymns.js?v=1788123205";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1447,7 +1447,7 @@ function viewMeeting(date) {
   const el = openModal(`
     <h3>${fmtDay(date, { year: true })} <span class="row-sub">·${nthSunday(date) === 5 ? " 5th Sunday ·" : ""} ${esc(typeLabel(m, date))}</span>
       ${m.theme ? `<div class="theme-tag" style="margin-top:.2rem">“${esc(m.theme)}”</div>` : ""}</h3>
-    ${renderAgendaView(m)}
+    <div id="ag-wrap">${renderAgendaView(m, canEdit)}</div>
     <div class="modal-actions">
       <div class="right">
         <button class="btn" id="vw-close">Close</button>
@@ -1456,28 +1456,75 @@ function viewMeeting(date) {
     </div>`);
   el.querySelector("#vw-close").addEventListener("click", closeModal);
   el.querySelector("#vw-edit")?.addEventListener("click", () => { closeModal(); editMeeting(date); });
+  if (!canEdit) return;
+  const refresh = () => { el.querySelector("#ag-wrap").innerHTML = renderAgendaView(meetings[date] || m, canEdit); };
+  const inlineNum = (holder, curVal, style, onCommit) => {
+    holder.innerHTML = `<input value="${esc(String(curVal))}" style="${style}">`;
+    const inp = holder.querySelector("input");
+    inp.focus(); inp.select();
+    let done = false;
+    const commit = async () => {
+      if (done) return; done = true;
+      await onCommit(inp.value.trim());
+      refresh();
+    };
+    inp.addEventListener("click", (ev) => ev.stopPropagation());
+    inp.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+      if (ev.key === "Escape") { ev.preventDefault(); done = true; refresh(); }
+    });
+    inp.addEventListener("blur", () => setTimeout(() => { if (!done) commit(); }, 100));
+  };
+  el.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-tedit]");
+    if (t && !t.querySelector("input")) {
+      const idx = Number(t.dataset.tedit);
+      inlineNum(t, meetings[date]?.items?.[idx]?.time ?? "", "width:3.2rem;font:inherit;font-size:.8rem;padding:.05rem .2rem;border:1px solid var(--line);border-radius:4px",
+        (v) => patchMeeting(date, (mm) => { if (mm.items[idx]) mm.items[idx].time = Math.max(0, Number(v) || 0); }));
+      return;
+    }
+    const s = e.target.closest("[data-startedit]");
+    if (s && !s.querySelector("input")) {
+      inlineNum(s, meetings[date]?.startTime || "9:00", "width:4.2rem;font:inherit;font-size:.85rem;padding:.05rem .25rem;border:1px solid var(--line);border-radius:4px",
+        (v) => patchMeeting(date, (mm) => { mm.startTime = /^\d{1,2}:\d{2}$/.test(v) ? v : "9:00"; }));
+    }
+  });
 }
 
-function renderAgendaView(m) {
+function renderAgendaView(m, canEdit = false) {
   if (NO_MEETING(m.type)) {
     return `<div class="row-sub" style="margin-top:.4rem">🏛 ${esc(typeLabel(m, m.date))} — no ward sacrament meeting.${m.notes ? " " + esc(m.notes) : ""}</div>`;
   }
-  // each row: label | value | minutes pinned to the far right column
-  const row = (label, val, time) =>
-    `<div class="ag-row"><span class="ag-label">${esc(label)}:</span><span class="ag-val">${val}</span>${time ? `<span class="ag-time">${time} min</span>` : ""}</div>`;
+  // running clock: each item row shows the wall time it starts at
+  const startStr = m.startTime || "9:00";
+  const sm = /^(\d{1,2}):(\d{2})$/.exec(startStr.trim());
+  let curClock = sm ? Number(sm[1]) * 60 + Number(sm[2]) : 9 * 60;
+  const fmtClock = (t) => `${((Math.floor(t / 60) + 11) % 12) + 1}:${String(t % 60).padStart(2, "0")}`;
+  let totalMin = 0;
+  // clock chip + minutes; minutes are click-to-edit for bishopric (idx = items index)
+  const timeCell = (time, idx) => {
+    if (!time && time !== 0) return "";
+    const startsAt = fmtClock(curClock);
+    const mins = Number(time) || 0;
+    curClock += mins; totalMin += mins;
+    return `<span class="ag-clock">${startsAt}</span><span class="ag-time${canEdit && idx != null ? " ag-tclick" : ""}"${canEdit && idx != null ? ` data-tedit="${idx}" title="Click to change the minutes"` : ""}>${time} min</span>`;
+  };
+  const row = (label, val, time, idx) =>
+    `<div class="ag-row"><span class="ag-label">${esc(label)}:</span><span class="ag-val">${val}</span>${time ? timeCell(time, idx) : ""}</div>`;
   const head = [
     m.presiding ? row("Presiding", esc(m.presiding)) : "",
     m.conducting ? row("Conducting", esc(m.conducting)) : "",
     row("Music conductor", m.chorister ? esc(m.chorister) : `<span class="row-sub">—</span>`),
     row("Organist", m.organist ? esc(m.organist) : `<span class="row-sub">—</span>`),
+    `<div class="ag-row"><span class="ag-label">Starts at:</span><span class="ag-val"><span${canEdit ? ` class="st-click" data-startedit title="Click to change the start time"` : ""}>${esc(startStr)}</span></span></div>`,
   ].join("");
-  const items = (m.items || []).map((it) => {
+  const items = (m.items || []).map((it, itemIdx) => {
     const label = it.kind === "custom" ? (it.label || "Item") : (KINDS[it.kind]?.label || it.kind);
     // sacrament administration is the meeting's center of gravity — set it
     // apart (older docs use kind "sacrament", newer defaults "blessing")
     if (it.kind === "sacrament" || it.kind === "blessing") {
       const who = it.kind === "blessing" ? [it.priest1, it.priest2].filter(Boolean).join(" & ") : "";
-      return `<div class="ag-row ag-sacrament"><span class="ag-sac-label">${esc(KINDS[it.kind].label)}${who ? ` <span class="ag-sac-who">· ${esc(who)}</span>` : ""}</span>${it.time ? `<span class="ag-time">${it.time} min</span>` : ""}</div>`;
+      return `<div class="ag-row ag-sacrament"><span class="ag-sac-label">${esc(KINDS[it.kind].label)}${who ? ` <span class="ag-sac-who">· ${esc(who)}</span>` : ""}</span>${it.time ? timeCell(it.time, itemIdx) : ""}</div>`;
     }
     // primary/youth slots with nobody assigned (or marked none) stay off the agenda
     if ((it.kind === "primarySpeaker" || it.kind === "youthSpeaker") && (it.none || !it.name)) return "";
@@ -1513,9 +1560,10 @@ function renderAgendaView(m) {
     } else {
       val = esc(it.text || "");
     }
-    return row(label, val, it.time || "");
+    return row(label, val, it.time || "", itemIdx);
   }).join("");
-  return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;
+  const totalRow = `<div class="ag-row ag-total"><span class="ag-label">Total:</span><span class="ag-val"></span><span class="ag-clock">ends ~${fmtClock(curClock)}</span><span class="ag-time">${totalMin} min</span></div>`;
+  return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${totalRow}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;
 }
 
 // ===== Table (spreadsheet) view =====

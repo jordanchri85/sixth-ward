@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788127184";
-import { ctx, hasRole } from "./app.js?v=1788127184";
+import { db } from "./firebase-init.js?v=1788127397";
+import { ctx, hasRole } from "./app.js?v=1788127397";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788127184";
-import { HYMNS } from "./hymns.js?v=1788127184";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788127397";
+import { HYMNS } from "./hymns.js?v=1788127397";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -569,7 +569,7 @@ function statusChips(m, date) {
       const orgTag = l.org ? ` <span class="st-li-org">${esc(ORG_ABBR[l.org] || l.org)}</span>` : "";
       // inlineEdit lines edit in place on click instead of opening the popup
       const editAttr = l.inlineEdit && can ? ` data-ed='${JSON.stringify(l.inlineEdit)}' title="Click to type here"` : "";
-      return `<span class="st-line"${editAttr}>${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name${l.light ? " st-li-light" : ""}">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
+      return `<span class="st-line${l.light ? " st-line-light" : ""}"${editAttr}>${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name${l.light ? " st-li-light" : ""}">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
     }).join("");
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks

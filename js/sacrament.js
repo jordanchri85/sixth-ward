@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788119091";
-import { ctx, hasRole } from "./app.js?v=1788119091";
+import { db } from "./firebase-init.js?v=1788119723";
+import { ctx, hasRole } from "./app.js?v=1788119723";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788119091";
-import { HYMNS } from "./hymns.js?v=1788119091";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788119723";
+import { HYMNS } from "./hymns.js?v=1788119723";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -541,9 +541,35 @@ function statusChips(m, date) {
   const inv = of("invocation")[0];
   const ben = of("benediction")[0];
 
+  // combined pill: a headline plus one line per slot, each line with its own
+  // click-to-confirm dot. Green when every slot is named AND confirmed,
+  // yellow once anything is named, red/grey when empty.
+  const groupChip = (label, qe, lines) => {
+    const named = lines.filter((l) => l.name);
+    const allDone = lines.length > 0 && named.length === lines.length && lines.every((l) => l.confirmed);
+    const cls = named.length === 0 ? (planned ? "st-miss" : "st-off") : allDone ? "st-ok" : "st-pending";
+    const body = lines.map((l) => {
+      const dot = l.name && l.confirmed
+        ? `<span class="st-li-ic" title="${l.confirmedBy ? "Confirmed by " + esc(l.confirmedBy) : "Confirmed"}">✓</span>`
+        : l.name && can
+        ? `<span class="st-li-ic st-confirm-dot" data-confirm='${JSON.stringify({ k: l.k, o: l.o })}' title="Click to mark confirmed">○</span>`
+        : `<span class="st-li-ic"></span>`;
+      const orgTag = l.org ? ` <span class="st-li-org">${esc(ORG_ABBR[l.org] || l.org)}</span>` : "";
+      return `<span class="st-line">${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
+    }).join("");
+    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head"><span class="st-icon">${allDone ? "✓" : "○"}</span> ${label}</span>${body}</span>`;
+  };
+
+  const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
+    tag: tagFn(it, i), name: it.name, confirmed: it.confirmed, confirmedBy: it.confirmedBy, k: kind, o: i,
+  }));
+  const adultSpk = of("speaker");
+
   const chips = [
-    chip("Open Prayer", inv?.name, { t: "i", k: "invocation", o: 0 }, inv?.confirmed, inv?.confirmedBy, inv?.org, null, { k: "invocation", o: 0 }),
-    chip("Close Prayer", ben?.name, { t: "i", k: "benediction", o: 0 }, ben?.confirmed, ben?.confirmedBy, ben?.org, null, { k: "benediction", o: 0 }),
+    groupChip("Prayers", { t: "prayers" }, [
+      { tag: "Open", name: inv?.name, org: inv?.org, confirmed: inv?.confirmed, confirmedBy: inv?.confirmedBy, k: "invocation", o: 0 },
+      { tag: "Closing", name: ben?.name, org: ben?.org, confirmed: ben?.confirmed, confirmedBy: ben?.confirmedBy, k: "benediction", o: 0 },
+    ]),
     `<span class="st ${hymnsTotal > 0 && hymnsFilled === hymnsTotal ? "st-ok" : planned ? "st-miss" : "st-off"}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify({ t: "h" })}'` : ""}><span class="st-head"><span class="st-icon">${hymnsFilled === hymnsTotal && hymnsTotal ? "✓" : "○"}</span> Hymns</span><span class="st-name">${hymnsFilled} of ${hymnsTotal}</span></span>`,
   ];
 
@@ -560,34 +586,17 @@ function statusChips(m, date) {
     chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Interm. / Musical</span></span>`);
   }
 
-  // Speaker pills, per kind. Up to 2 adult speakers (or 1 primary/youth)
-  // show individually; beyond that they collapse into one "N Speakers"
-  // pill that opens the group editor. All speaker pills open that editor,
-  // which is also where slots are added and removed.
-  const SPK_DEFS = [
-    ["primarySpeaker", "Primary Speaker", "Primary Speakers", 1],
-    ["youthSpeaker", "Youth Speaker", "Youth Speakers", 1],
-    ["speaker", "Speaker", "Speakers", 2],
+  // Youth pill = primary + youth speakers; Speakers pill = the adult speakers.
+  const prim = of("primarySpeaker"), yth = of("youthSpeaker");
+  const youthLines = [
+    ...spkLines("primarySpeaker", (it, i) => prim.length > 1 ? `Primary ${i + 1}` : "Primary"),
+    ...spkLines("youthSpeaker", (it, i) => yth.length > 1 ? `Youth ${i + 1}` : "Youth"),
   ];
-  SPK_DEFS.forEach(([kind, single, plural, maxIndividual]) => {
-    const list = of(kind);
-    if (!list.length) return;
-    const qe = { t: "spk", k: kind };
-    if (list.length <= maxIndividual) {
-      list.forEach((it, i) => {
-        const label = kind === "speaker" && list.length > 1 ? `Speaker ${i + 1}` : single;
-        chips.push(chip(label, it.name, qe, it.confirmed, it.confirmedBy, null, null, { k: kind, o: i })); // name only — topic lives in the editor/view
-      });
-    } else {
-      const named = list.filter((s) => s.name).length;
-      const allNamed = named === list.length;
-      const allConfirmed = allNamed && list.every((s) => s.confirmed);
-      const cls = named === 0 ? (planned ? "st-miss" : "st-off") : allConfirmed ? "st-ok" : "st-pending";
-      const icon = allConfirmed ? "✓" : named ? "●" : "○";
-      const sub = allNamed ? "" : `${named} of ${list.length} assigned`;
-      chips.push(`<span class="st ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to view or edit"` : ""}><span class="st-head"><span class="st-icon">${icon}</span> ${plural}</span><span class="st-name">${list.length} Speakers</span>${sub ? `<span class="st-sub">${sub}</span>` : ""}</span>`);
-    }
-  });
+  if (youthLines.length) chips.push(groupChip("Youth", { t: "py" }, youthLines));
+  if (adultSpk.length) {
+    chips.push(groupChip("Speakers", { t: "spk", k: "speaker" },
+      spkLines("speaker", (it, i) => String(i + 1))));
+  }
 
   return `<div class="st-row">${chips.join("")}</div>`;
 }
@@ -867,12 +876,43 @@ function quickEdit(date, q) {
         }
       };
     };
-  } else if (q.t === "spk") {
-    // group editor for one speaker kind: edit, confirm, add, and remove slots
-    const kind = q.k;
-    const label = KINDS[kind].label;
-    const list = items.filter((i) => i.kind === kind).map((s) => ({ ...s }));
-    if (!list.length) list.push({ name: "", topic: "", confirmed: false, confirmedBy: "" });
+  } else if (q.t === "prayers") {
+    // combined editor for the opening + closing prayers
+    const inv = nthItem(items, "invocation", 0);
+    const ben = nthItem(items, "benediction", 0);
+    const sect = (id, label, it) => `
+      <div class="row-sub" style="margin:.7rem 0 .25rem;font-weight:700">${label}</div>
+      <label class="field">Name <input id="qe-${id}-name" value="${esc(it?.name || "")}"></label>
+      <label class="field" style="margin-top:.4rem">Arranged by ${orgSel(`qe-${id}-org`, it?.org || "")}</label>
+      <label class="field confirm-field" style="margin-top:.4rem">
+        <span><input type="checkbox" id="qe-${id}-conf" ${it?.confirmed ? "checked" : ""}> Confirmed</span>
+        ${it?.confirmed && it?.confirmedBy ? `<span class="row-sub confirm-by">Confirmed by ${esc(it.confirmedBy)}</span>` : ""}
+      </label>`;
+    html = `<h3>Prayers ${dateLabel}</h3>
+      ${sect("inv", "Opening prayer", inv)}
+      ${sect("ben", "Closing prayer", ben)}`;
+    onSave = (el) => {
+      const read = (id) => ({
+        name: el.querySelector(`#qe-${id}-name`).value.trim(),
+        org: el.querySelector(`#qe-${id}-org`).value,
+        confirmed: el.querySelector(`#qe-${id}-conf`).checked,
+      });
+      const vals = [["invocation", read("inv"), inv], ["benediction", read("ben"), ben]];
+      return (m) => {
+        vals.forEach(([kind, v, prev]) => {
+          const t = ensureQE(m, { k: kind, o: 0 });
+          t.name = v.name; t.org = v.org;
+          t.confirmed = v.confirmed;
+          t.confirmedBy = v.confirmed ? (prev?.confirmed ? prev.confirmedBy : ctx.name) : "";
+        });
+      };
+    };
+  } else if (q.t === "spk" || q.t === "py") {
+    // group editor for one or more speaker kinds: edit, confirm, add, remove slots.
+    // "spk" edits a single kind (adult speakers); "py" edits the Youth pill's
+    // two kinds (primary + youth speakers) in one modal.
+    const kinds = q.t === "py" ? ["primarySpeaker", "youthSpeaker"] : [q.k];
+    const title = q.t === "py" ? "Youth" : `${KINDS[q.k].label}s`;
     const rowHtml = (s) => `
       <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
         <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1" value="${esc(s.name || "")}">
@@ -881,30 +921,45 @@ function quickEdit(date, q) {
           <input type="checkbox" class="spk-conf" ${s.confirmed ? "checked" : ""}> Confirmed</label>
         <button class="btn btn-sm spk-del" type="button" title="Remove this speaker slot">✕</button>
       </div>`;
-    html = `<h3>${label}s ${dateLabel}</h3>
-      <p class="row-sub" style="margin:.2rem 0 .6rem">✕ removes a slot entirely; leave the name blank to keep an unassigned slot.</p>
-      <div id="qe-spk-rows">${list.map(rowHtml).join("")}</div>
-      <button class="btn btn-sm" id="qe-spk-add" type="button">+ Add ${label.toLowerCase()}</button>`;
+    const sectHtml = (kind) => {
+      const label = KINDS[kind].label;
+      const list = items.filter((i) => i.kind === kind).map((s) => ({ ...s }));
+      // single-kind editor seeds a blank row; the combined Youth editor leaves
+      // empty kinds empty so saving doesn't invent unassigned slots
+      if (!list.length && q.t === "spk") list.push({ name: "", topic: "", confirmed: false, confirmedBy: "" });
+      return `
+        ${kinds.length > 1 ? `<div class="row-sub" style="margin:.7rem 0 .25rem;font-weight:700">${label}s</div>` : ""}
+        <div class="qe-spk-rows" data-kind="${kind}">${list.map(rowHtml).join("")}</div>
+        <button class="btn btn-sm" data-spkadd="${kind}" type="button">+ Add ${label.toLowerCase()}</button>`;
+    };
+    html = `<h3>${title} ${dateLabel}</h3>
+      <p class="row-sub" style="margin:.2rem 0 .4rem">✕ removes a slot entirely; leave the name blank to keep an unassigned slot.</p>
+      ${kinds.map(sectHtml).join("")}`;
     onSave = (el) => {
-      const rows = [...el.querySelectorAll("#qe-spk-rows .spk-row")].map((r) => ({
-        name: r.querySelector(".spk-name").value.trim(),
-        topic: r.querySelector(".spk-topic").value.trim(),
-        confirmed: r.querySelector(".spk-conf").checked,
+      const byKind = kinds.map((kind) => ({
+        kind,
+        rows: [...el.querySelectorAll(`.qe-spk-rows[data-kind="${kind}"] .spk-row`)].map((r) => ({
+          name: r.querySelector(".spk-name").value.trim(),
+          topic: r.querySelector(".spk-topic").value.trim(),
+          confirmed: r.querySelector(".spk-conf").checked,
+        })),
       }));
       return (m) => {
-        const existing = m.items.filter((i) => i.kind === kind);
-        rows.forEach((r, i) => {
-          let it = existing[i];
-          if (!it) { it = blankItem(kind); insertCanonical(m.items, it); }
-          const wasConfirmed = it.confirmed;
-          it.name = r.name; it.topic = r.topic;
-          it.confirmed = r.confirmed;
-          it.confirmedBy = r.confirmed ? (wasConfirmed ? it.confirmedBy : ctx.name) : "";
+        byKind.forEach(({ kind, rows }) => {
+          const existing = m.items.filter((i) => i.kind === kind);
+          rows.forEach((r, i) => {
+            let it = existing[i];
+            if (!it) { it = blankItem(kind); insertCanonical(m.items, it); }
+            const wasConfirmed = it.confirmed;
+            it.name = r.name; it.topic = r.topic;
+            it.confirmed = r.confirmed;
+            it.confirmedBy = r.confirmed ? (wasConfirmed ? it.confirmedBy : ctx.name) : "";
+          });
+          if (existing.length > rows.length) {
+            const surplus = new Set(existing.slice(rows.length));
+            m.items = m.items.filter((i) => !surplus.has(i));
+          }
         });
-        if (existing.length > rows.length) {
-          const surplus = new Set(existing.slice(rows.length));
-          m.items = m.items.filter((i) => !surplus.has(i));
-        }
       };
     };
   } else if (q.t === "announce") {
@@ -1055,9 +1110,10 @@ function quickEdit(date, q) {
       el.querySelector("#qe-ann-rows .speaker-row:last-child .ann-line")?.focus();
     }
     if (e.target.classList.contains("ann-del")) e.target.closest(".speaker-row").remove();
-    // speaker group rows
-    if (e.target.id === "qe-spk-add") {
-      el.querySelector("#qe-spk-rows").insertAdjacentHTML("beforeend", `
+    // speaker group rows (data-spkadd names the kind's row container)
+    if (e.target.dataset.spkadd) {
+      const wrap = el.querySelector(`.qe-spk-rows[data-kind="${e.target.dataset.spkadd}"]`);
+      wrap.insertAdjacentHTML("beforeend", `
         <div class="spk-row" style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
           <input class="spk-name" placeholder="Name" autocomplete="off" style="flex:1">
           <input class="spk-topic" placeholder="Topic (optional)" autocomplete="off" style="flex:1">
@@ -1065,7 +1121,7 @@ function quickEdit(date, q) {
             <input type="checkbox" class="spk-conf"> Confirmed</label>
           <button class="btn btn-sm spk-del" type="button" title="Remove this speaker slot">✕</button>
         </div>`);
-      el.querySelector("#qe-spk-rows .spk-row:last-child .spk-name")?.focus();
+      wrap.querySelector(".spk-row:last-child .spk-name")?.focus();
     }
     if (e.target.classList.contains("spk-del")) e.target.closest(".spk-row").remove();
   });

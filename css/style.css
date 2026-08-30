@@ -224,13 +224,14 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .agenda-view .ag-row { display: flex; gap: .5rem; align-items: baseline; }
 .agenda-view .ag-val { flex: 1; min-width: 0; }
 .agenda-view .ag-time { color: var(--ink-soft); font-size: .82rem; white-space: nowrap; margin-left: auto; }
-/* the sacrament administration row stands apart: bold, centered */
-.agenda-view .ag-sacrament { margin: .25rem 0; padding: .2rem 0; background: var(--brand-soft); border-radius: 6px; }
+/* the sacrament administration row stands apart: bold, centered.
+   The blue boxes bleed outward (negative margins matching their padding)
+   so their clock/min columns line up exactly with the plain rows. */
+.agenda-view .ag-sacrament { margin: .25rem -.4rem; padding: .2rem .4rem; background: var(--brand-soft); border-radius: 6px; }
 /* sacrament hymn joins the band above it as one grouped blue block */
-.agenda-view .ag-sac-hymn { background: var(--brand-soft); border-radius: 6px; margin-top: .25rem; padding: .2rem .4rem; }
+.agenda-view .ag-sac-hymn { background: var(--brand-soft); border-radius: 6px; margin: .25rem -.4rem 0; padding: .2rem .4rem; }
 .agenda-view .ag-sac-hymn:has(+ .ag-sacrament) { border-radius: 6px 6px 0 0; padding-bottom: .1rem; }
 .agenda-view .ag-sac-hymn + .ag-sacrament { border-radius: 0 0 6px 6px; margin-top: 0; }
-.agenda-view .ag-sacrament .ag-time, .agenda-view .ag-sac-hymn .ag-time { padding-right: .4rem; }
 /* label centers on the full row width — the time columns overlay at the right */
 .agenda-view .ag-sacrament { position: relative; justify-content: flex-end; }
 .agenda-view .ag-sac-label {
@@ -261,7 +262,6 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 /* full-width variant: sits on its own line under the row so text doesn't wrap early */
 .agenda-view .ag-detail-full { display: block; width: 100%; margin: .1rem 0 .4rem; }
-.agenda-view .ag-sacrament .ag-clock { margin-left: 0; }
 
 /* ===== Sacrament: cards, status chips, table ===== */
 .card.clickable { cursor: pointer; }

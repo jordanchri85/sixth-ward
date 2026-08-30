@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788125689";
-import { ctx, hasRole } from "./app.js?v=1788125689";
+import { db } from "./firebase-init.js?v=1788125968";
+import { ctx, hasRole } from "./app.js?v=1788125968";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125689";
-import { HYMNS } from "./hymns.js?v=1788125689";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125968";
+import { HYMNS } from "./hymns.js?v=1788125968";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -602,13 +602,21 @@ function statusChips(m, date) {
 
   // Intermediate slot: its own pill right after Hymns, with its own editor
   // (Hymn / Special Musical # / Choir toggle lives there).
+  // where the music number sits relative to the adult speakers (small subtext)
+  const slotPos = (() => {
+    const slotIdx = items.findIndex((i) => ["intermediateHymn", "musical", "choir"].includes(i.kind));
+    const spkIdxs = items.map((it, i) => (it.kind === "speaker" ? i : -1)).filter((i) => i >= 0);
+    if (slotIdx < 0 || !spkIdxs.length) return "";
+    const before = spkIdxs.filter((i) => i < slotIdx).length;
+    return before === 0 ? "before the speakers" : `after speaker ${before}`;
+  })();
   if (slotMusical) {
-    chips.push(chip("Music Number", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, slotMusical.hymn, { k: "musical", o: 0 }));
+    chips.push(chip("Music Number", slotMusical.who, { t: "inter" }, slotMusical.confirmed, slotMusical.confirmedBy, null, [slotMusical.hymn, slotPos].filter(Boolean).join(" · "), { k: "musical", o: 0 }));
   } else if (slotChoir) {
-    chips.push(chip("Music Number", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, slotChoir.hymn, { k: "choir", o: 0 }));
+    chips.push(chip("Music Number", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, [slotChoir.hymn, slotPos].filter(Boolean).join(" · "), { k: "choir", o: 0 }));
   } else if (slotInterHymn) {
     const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
-    chips.push(chip("Music Number", hymnVal, { t: "inter" }, true, null));
+    chips.push(chip("Music Number", hymnVal, { t: "inter" }, true, null, null, slotPos));
   } else if (type !== "fast") {
     // Fast & Testimony has no intermediate slot — skip the empty pill there
     chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head">Music Number</span></span>`);

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788126775";
-import { ctx, hasRole } from "./app.js?v=1788126775";
+import { db } from "./firebase-init.js?v=1788127184";
+import { ctx, hasRole } from "./app.js?v=1788127184";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788126775";
-import { HYMNS } from "./hymns.js?v=1788126775";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788127184";
+import { HYMNS } from "./hymns.js?v=1788127184";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -557,7 +557,11 @@ function statusChips(m, date) {
         const editAttr = l.inlineEdit && can ? ` data-ed='${JSON.stringify(l.inlineEdit)}' title="Click to type here"` : "";
         return `<span class="st-line"${editAttr}><span class="st-li-ic"></span><span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name st-none">none</span></span>`;
       }
-      const dot = l.name && l.confirmed
+      // "light" lines (hymns) skip the icon column entirely — left-flush
+      // tags and wrapping names buy room for long hymn titles
+      const dot = l.light
+        ? ""
+        : l.name && l.confirmed
         ? `<span class="st-li-ic" title="${l.confirmedBy ? "Confirmed by " + esc(l.confirmedBy) : "Confirmed"}">✓</span>`
         : l.name && can
         ? `<span class="st-li-ic st-confirm-dot" data-confirm='${JSON.stringify({ k: l.k, o: l.o })}' title="Click to mark confirmed">○</span>`
@@ -565,7 +569,7 @@ function statusChips(m, date) {
       const orgTag = l.org ? ` <span class="st-li-org">${esc(ORG_ABBR[l.org] || l.org)}</span>` : "";
       // inlineEdit lines edit in place on click instead of opening the popup
       const editAttr = l.inlineEdit && can ? ` data-ed='${JSON.stringify(l.inlineEdit)}' title="Click to type here"` : "";
-      return `<span class="st-line"${editAttr}>${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
+      return `<span class="st-line"${editAttr}>${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name${l.light ? " st-li-light" : ""}">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
     }).join("");
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks
@@ -591,8 +595,9 @@ function statusChips(m, date) {
     ]),
     groupChip("Hymns", { t: "h" }, hymnItems.map((h) => ({
       tag: HYMN_TAGS[h.kind] || KINDS[h.kind]?.label || h.kind,
-      name: [h.num ? "#" + h.num : "", h.title].filter(Boolean).join(" "),
+      name: [h.num ? "#" + h.num : "", h.title].filter(Boolean).join(" - "),
       confirmed: !!(h.num || h.title),
+      light: true, // hymn titles stay unbolded so more of the name fits
       inlineEdit: { t: "hymn", k: h.kind, o: 0 },
     })), {
       html: `Organ: ${esc(m?.organist || "—")} · Conduct: ${esc(m?.chorister || "—")}`,
@@ -615,7 +620,7 @@ function statusChips(m, date) {
   } else if (slotChoir) {
     chips.push(chip("Music Number", "Choir", { t: "inter" }, slotChoir.confirmed, slotChoir.confirmedBy, null, [slotChoir.hymn, slotPos].filter(Boolean).join(" · "), { k: "choir", o: 0 }));
   } else if (slotInterHymn) {
-    const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
+    const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" - ");
     chips.push(chip("Music Number", hymnVal, { t: "inter" }, true, null, null, slotPos));
   } else if (type !== "fast") {
     // Fast & Testimony has no intermediate slot — skip the empty pill there

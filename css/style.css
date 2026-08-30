@@ -463,6 +463,16 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 
 /* a "none this week" line reads quiet — it isn't missing, it's decided */
 .st-line .st-none { font-style: italic; font-weight: 500; opacity: .6; }
+/* hymn titles: unbolded and allowed to wrap onto a second line before clipping */
+.st-line .st-li-name.st-li-light {
+  font-weight: 500;
+  white-space: normal;
+  text-align: left;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* organist / conductor inline editing on the Hymns subhead */
 .st-subhead[data-musiced] { cursor: pointer; }

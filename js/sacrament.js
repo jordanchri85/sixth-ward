@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788122173";
-import { ctx, hasRole } from "./app.js?v=1788122173";
+import { db } from "./firebase-init.js?v=1788122369";
+import { ctx, hasRole } from "./app.js?v=1788122369";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122173";
-import { HYMNS } from "./hymns.js?v=1788122173";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788122369";
+import { HYMNS } from "./hymns.js?v=1788122369";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -544,10 +544,19 @@ function statusChips(m, date) {
   // click-to-confirm dot. Green when every slot is named AND confirmed,
   // yellow once anything is named, red/grey when empty.
   const groupChip = (label, qe, lines, subhead, footer) => {
-    const named = lines.filter((l) => l.name);
-    const allDone = lines.length > 0 && named.length === lines.length && lines.every((l) => l.confirmed);
-    const cls = named.length === 0 ? (planned ? "st-miss" : "st-off") : allDone ? "st-ok" : "st-pending";
+    // lines marked "none" (no speaker planned this week) don't count as
+    // missing: a pill of all-none goes grey, and the rest can still go green
+    const real = lines.filter((l) => !l.none);
+    const named = real.filter((l) => l.name);
+    const allDone = real.length > 0 && named.length === real.length && real.every((l) => l.confirmed);
+    const cls = real.length === 0
+      ? "st-off"
+      : named.length === 0 ? (planned ? "st-miss" : "st-off") : allDone ? "st-ok" : "st-pending";
     const body = lines.map((l) => {
+      if (l.none) {
+        const editAttr = l.inlineEdit && can ? ` data-ed='${JSON.stringify(l.inlineEdit)}' title="Click to type here"` : "";
+        return `<span class="st-line"${editAttr}><span class="st-li-ic"></span><span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name st-none">none</span></span>`;
+      }
       const dot = l.name && l.confirmed
         ? `<span class="st-li-ic" title="${l.confirmedBy ? "Confirmed by " + esc(l.confirmedBy) : "Confirmed"}">✓</span>`
         : l.name && can
@@ -569,6 +578,7 @@ function statusChips(m, date) {
 
   const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
     tag: tagFn(it, i), name: it.name, confirmed: it.confirmed, confirmedBy: it.confirmedBy, k: kind, o: i,
+    none: !!it.none,
     inlineEdit: { t: "name", k: kind, o: i },
   }));
   const adultSpk = of("speaker");
@@ -662,7 +672,6 @@ function renderCards(wrap) {
     const isConf = NO_MEETING(type);
     const nth = nthSunday(date);
     const babies = planned ? (m.items || []).filter((i) => i.kind === "babyBlessing") : [];
-    const hasChoir = planned ? (m.items || []).some((i) => i.kind === "choir") : false;
     const announceText = planned ? (m.items || []).find((i) => i.kind === "announcements")?.text || "" : "";
     const megaphone = canEdit && !isConf ? `
       <button class="megaphone-btn${announceText ? " has-announce" : ""}" data-qe='{"t":"announce"}' title="${announceText ? esc(announceText.split("\n").filter(Boolean).map((l) => "• " + l).join("\n").slice(0, 160)) : "Add announcements"}">
@@ -702,7 +711,7 @@ function renderCards(wrap) {
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
             ${megaphone}${wbIcon}${type !== "sacrament" ? `<span class="pill head-pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}">${esc(typeLabel(m, date))}</span>` : ""}${nth === 5 ? `<span class="nth-pill nth-5 head-pill">5th Sunday</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold head-pill">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}
           </h3>
-          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
+          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
         </div>
         <div style="display:flex;gap:.4rem">
           ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}
@@ -796,6 +805,7 @@ function renderCards(wrap) {
           if (!t) { t = blankItem(k); insertCanonical(mm.items, t); }
           const newName = nameIn.value.trim();
           if (newName !== (it?.name || "")) { t.confirmed = false; t.confirmedBy = ""; } // a different person isn't confirmed yet
+          if (newName) t.none = false; // typing a name overrides a "none this week" mark
           t.name = newName;
         }));
       }
@@ -1034,13 +1044,20 @@ function quickEdit(date, q) {
     const sectHtml = (kind) => {
       const label = KINDS[kind].label;
       const list = items.filter((i) => i.kind === kind).map((s) => ({ ...s }));
+      const noneMarked = list.some((s) => s.none);
+      const rowsList = list.filter((s) => !s.none);
       // single-kind editor seeds a blank row; the combined Youth editor leaves
       // empty kinds empty so saving doesn't invent unassigned slots
-      if (!list.length && q.t === "spk") list.push({ name: "", topic: "", confirmed: false, confirmedBy: "" });
+      if (!rowsList.length && q.t === "spk") rowsList.push({ name: "", topic: "", confirmed: false, confirmedBy: "" });
+      // Youth kinds can be marked "none this Sunday" — pill shows a grey "none"
+      const noneBox = q.t === "py" ? `
+        <label style="display:flex;align-items:center;gap:.3rem;font-size:.78rem;margin:.1rem 0 .35rem">
+          <input type="checkbox" class="spk-none" data-kind="${kind}" ${noneMarked ? "checked" : ""}> No ${label.toLowerCase()} this Sunday</label>` : "";
       return `
         ${kinds.length > 1 ? `<div class="row-sub" style="margin:.7rem 0 .25rem;font-weight:700">${label}s</div>` : ""}
-        <div class="qe-spk-rows" data-kind="${kind}">${list.map(rowHtml).join("")}</div>
-        <button class="btn btn-sm" data-spkadd="${kind}" type="button">+ Add ${label.toLowerCase()}</button>`;
+        ${noneBox}
+        <div class="qe-spk-rows" data-kind="${kind}" style="${noneMarked ? "display:none" : ""}">${rowsList.map(rowHtml).join("")}</div>
+        <button class="btn btn-sm" data-spkadd="${kind}" type="button" style="${noneMarked ? "display:none" : ""}">+ Add ${label.toLowerCase()}</button>`;
     };
     html = `<h3>${title} ${dateLabel}</h3>
       <p class="row-sub" style="margin:.2rem 0 .4rem">✕ removes a slot entirely; leave the name blank to keep an unassigned slot.</p>
@@ -1048,6 +1065,7 @@ function quickEdit(date, q) {
     onSave = (el) => {
       const byKind = kinds.map((kind) => ({
         kind,
+        none: !!el.querySelector(`.spk-none[data-kind="${kind}"]`)?.checked,
         rows: [...el.querySelectorAll(`.qe-spk-rows[data-kind="${kind}"] .spk-row`)].map((r) => ({
           name: r.querySelector(".spk-name").value.trim(),
           topic: r.querySelector(".spk-topic").value.trim(),
@@ -1055,7 +1073,16 @@ function quickEdit(date, q) {
         })),
       }));
       return (m) => {
-        byKind.forEach(({ kind, rows }) => {
+        byKind.forEach(({ kind, rows, none }) => {
+          if (none) {
+            // "no speaker this Sunday": one flag item replaces the kind's slots
+            m.items = m.items.filter((i) => i.kind !== kind);
+            const it = blankItem(kind);
+            it.none = true;
+            insertCanonical(m.items, it);
+            return;
+          }
+          m.items = m.items.filter((i) => !(i.kind === kind && i.none));
           const existing = m.items.filter((i) => i.kind === kind);
           let used = 0; // rows consumed against existing slots
           rows.forEach((r) => {
@@ -1068,6 +1095,7 @@ function quickEdit(date, q) {
             }
             used++;
             const wasConfirmed = it.confirmed;
+            it.none = false;
             it.name = r.name; it.topic = r.topic;
             it.confirmed = r.confirmed;
             it.confirmedBy = r.confirmed ? (wasConfirmed ? it.confirmedBy : ctx.name) : "";
@@ -1242,6 +1270,13 @@ function quickEdit(date, q) {
       wrap.querySelector(".spk-row:last-child .spk-name")?.focus();
     }
     if (e.target.classList.contains("spk-del")) e.target.closest(".spk-row").remove();
+    // "No speaker this Sunday" checkbox hides that kind's rows + add button
+    if (e.target.classList.contains("spk-none")) {
+      const kind = e.target.dataset.kind;
+      const show = !e.target.checked;
+      el.querySelector(`.qe-spk-rows[data-kind="${kind}"]`).style.display = show ? "" : "none";
+      el.querySelector(`[data-spkadd="${kind}"]`).style.display = show ? "" : "none";
+    }
   });
 
   // drag-and-drop: reorder speaker rows (grab the ⠿ handle; in the Youth
@@ -1409,7 +1444,7 @@ function renderAgendaView(m) {
     if (HYMN_KINDS.includes(it.kind)) {
       val = esc([it.num ? "#" + it.num : "", it.title].filter(Boolean).join(" "));
     } else if (SPEAKER_KINDS.includes(it.kind)) {
-      val = esc([it.name, it.topic ? "— " + it.topic : ""].filter(Boolean).join(" "));
+      val = it.none ? `<span class="row-sub">none this week</span>` : esc([it.name, it.topic ? "— " + it.topic : ""].filter(Boolean).join(" "));
     } else if (PRAYER_KINDS.includes(it.kind)) {
       val = esc(it.name || "") + (it.org ? ` <span class="row-sub">(arranged by ${esc(it.org)})</span>` : "");
     } else if (it.kind === "musical") {

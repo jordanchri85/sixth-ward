@@ -235,6 +235,16 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .agenda-view .ag-tclick { cursor: pointer; }
 .agenda-view .ag-tclick:hover { text-decoration: underline; color: var(--ink); }
 .agenda-view .ag-total { border-top: 1px solid var(--line); margin-top: .35rem; padding-top: .3rem; font-weight: 700; }
+/* announcements / ward business content sits in a soft grey box with bullets */
+.agenda-view .ag-detail-box {
+  display: inline-block; vertical-align: top;
+  background: #edf0f3;
+  border-radius: 8px;
+  padding: .35rem .65rem;
+  margin: .12rem 0 .25rem;
+  font-size: .84rem;
+  line-height: 1.55;
+}
 .agenda-view .ag-sacrament .ag-clock { margin-left: 0; }
 
 /* ===== Sacrament: cards, status chips, table ===== */

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788123524";
-import { ctx, hasRole } from "./app.js?v=1788123524";
+import { db } from "./firebase-init.js?v=1788123885";
+import { ctx, hasRole } from "./app.js?v=1788123885";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123524";
-import { HYMNS } from "./hymns.js?v=1788123524";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788123885";
+import { HYMNS } from "./hymns.js?v=1788123885";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1548,12 +1548,12 @@ function renderAgendaView(m, canEdit = false) {
       (it.releasings || []).forEach((r) => parts.push(`Release: ${esc(r.name)}${r.calling ? " — " + esc(r.calling) : ""}`));
       if (it.other) parts.push(esc(it.other));
       val = parts.length
-        ? `<span style="display:inline-block;vertical-align:top">${parts.join("<br>")}</span>`
+        ? `<span class="ag-detail-box">${parts.map((p) => `• ${p}`).join("<br>")}</span>`
         : "";
     } else if (it.kind === "announcements") {
       const lines = (it.text || "").split("\n").map((s) => s.trim()).filter(Boolean);
       val = lines.length
-        ? `<span style="display:inline-block;vertical-align:top">${lines.map((l) => `• ${esc(l)}`).join("<br>")}</span>`
+        ? `<span class="ag-detail-box">${lines.map((l) => `• ${esc(l)}`).join("<br>")}</span>`
         : "";
     } else {
       val = esc(it.text || "");

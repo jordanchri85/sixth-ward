@@ -467,9 +467,12 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
    wraps) at the same x position */
 .st-line-light { align-items: baseline; }
 .st-line-light .st-li-tag { flex: 0 0 4.6rem; text-align: left; }
-/* hymn titles: unbolded and allowed to wrap onto a second line before clipping */
+/* hymn titles: unbolded, tighter tracking, and allowed to wrap onto a
+   second line before clipping — all in service of fitting long names */
 .st-line .st-li-name.st-li-light {
   font-weight: 500;
+  letter-spacing: -.025em;
+  line-height: 1.2;
   white-space: normal;
   text-align: left;
   display: -webkit-box;

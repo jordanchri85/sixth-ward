@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788120186";
-import { ctx, hasRole } from "./app.js?v=1788120186";
+import { db } from "./firebase-init.js?v=1788120494";
+import { ctx, hasRole } from "./app.js?v=1788120494";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120186";
-import { HYMNS } from "./hymns.js?v=1788120186";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788120494";
+import { HYMNS } from "./hymns.js?v=1788120494";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -527,7 +527,8 @@ function statusChips(m, date) {
       : `<span class="st-icon">○</span>`;
     const orgBadge = org ? `<span class="st-org org-${org.toLowerCase().replace(/[^a-z]+/g, "-")}" title="${esc(org)}">${esc(ORG_ABBR[org] || org)}</span>` : "";
     const subLine = hasName && sub ? `<span class="st-sub">${esc(sub)}</span>` : "";
-    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head">${iconHtml} ${label}</span>${hasName ? `<span class="st-name">${esc(name)}</span>` : ""}${subLine}${orgBadge}</span>`;
+    // icon rides with the name (not the headline) so the title centers cleanly
+    return `<span class="st ${cls}${clickable ? " st-click" : ""}"${clickable ? ` data-qe='${JSON.stringify(qe)}'` : ""}${title ? ` title="${esc(title)}"` : ""}><span class="st-head">${label}</span>${hasName ? `<span class="st-name">${iconHtml} ${esc(name)}</span>` : ""}${subLine}${orgBadge}</span>`;
   };
 
   // Hymns pill counts only actual hymn slots; the musical/choir slot gets its own pill
@@ -555,7 +556,9 @@ function statusChips(m, date) {
       const orgTag = l.org ? ` <span class="st-li-org">${esc(ORG_ABBR[l.org] || l.org)}</span>` : "";
       return `<span class="st-line">${dot}<span class="st-li-tag">${esc(l.tag)}:</span> <span class="st-li-name">${l.name ? esc(l.name) : "—"}</span>${orgTag}</span>`;
     }).join("");
-    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head"><span class="st-icon">${allDone ? "✓" : "○"}</span> ${label}</span>${body}</span>`;
+    // no icon in the headline — the title stays cleanly centered; state
+    // lives in the pill color and the per-line marks
+    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${body}</span>`;
   };
 
   const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
@@ -588,7 +591,7 @@ function statusChips(m, date) {
     const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
     chips.push(chip("Interm. Hymn", hymnVal, { t: "inter" }, true, null));
   } else {
-    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head"><span class="st-icon">○</span> Interm. / Musical</span></span>`);
+    chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head">Interm. / Musical</span></span>`);
   }
 
   // Youth pill = primary + youth speakers; Speakers pill = the adult speakers.
@@ -643,7 +646,6 @@ function renderCards(wrap) {
     const planned = !!m;
     const isConf = NO_MEETING(type);
     const nth = nthSunday(date);
-    const total = planned ? (m.items || []).reduce((s, i) => s + (Number(i.time) || 0), 0) : 0;
     const babies = planned ? (m.items || []).filter((i) => i.kind === "babyBlessing") : [];
     const hasChoir = planned ? (m.items || []).some((i) => i.kind === "choir") : false;
     const announceText = planned ? (m.items || []).find((i) => i.kind === "announcements")?.text || "" : "";
@@ -684,9 +686,9 @@ function renderCards(wrap) {
           <h3 style="margin:0">${fmtDay(date, { year: true })}
             ${type !== "sacrament" ? `<span class="pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}" style="vertical-align:middle">${esc(typeLabel(m, date))}</span>` : ""}
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
-            ${condChip}
+            ${megaphone}${wbIcon}
           </h3>
-          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${megaphone}${wbIcon}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}<span>${planned && total ? `${total} min` : ""}${isConf ? "no sacrament meeting" : ""}</span></div>
+          <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${nth === 5 ? `<span class="nth-pill nth-5">5th Sunday</span>` : ""}${hasChoir ? `<span class="pill-choir-bold">🎵 Choir</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
         </div>
         <div style="display:flex;gap:.4rem">
           ${planned || isConf ? `<button class="btn btn-sm" data-view="${date}">View</button>` : ""}

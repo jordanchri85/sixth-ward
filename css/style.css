@@ -253,6 +253,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   border: none; border-radius: 6px; padding: 0;
   background: #e9ecef; color: #aab1ba;
   cursor: pointer;
+  vertical-align: middle; /* icons sit inline on the date headline */
 }
 .megaphone-btn:hover { background: #dfe3e7; }
 .megaphone-btn.has-announce { background: var(--brand-soft); color: var(--brand); }
@@ -298,7 +299,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st-confirm-dot:hover { opacity: 1 !important; transform: scale(1.2); display: inline-block; }
 /* icon + name carry the state color (red/amber/green); the label itself
    stays a neutral dark so "Conducting" doesn't visually fight the name */
-.st-icon { color: inherit; opacity: .38; font-weight: 400; font-size: .85em; }
+.st-icon { color: inherit; opacity: .25; font-weight: 400; font-size: .85em; }
 .st-head { color: var(--ink); font-weight: 700; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .st-off .st-head { color: var(--ink-soft); }
 .st-name {
@@ -329,16 +330,15 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .ha-blocked .ha-name { opacity: .45; text-decoration: line-through; }
 .ha-row .chip { font-size: .74rem; padding: .18rem .6rem; }
 
-/* compact Conducting chip up on the date line (frees a slot in the pill row) */
-/* plain text on the date line — no pill color */
+/* Conducting as a quiet subtitle under the date — no bold, no pill */
 .cond-inline {
   display: inline-block;
-  font-size: .82rem; font-weight: 600;
-  color: var(--ink);
+  font-size: .82rem; font-weight: 400;
+  color: var(--ink-soft);
   vertical-align: middle;
   white-space: nowrap;
 }
-.cond-inline.cond-empty { color: var(--ink-soft); font-weight: 500; }
+.cond-inline.cond-empty { color: var(--ink-soft); }
 
 /* drag-to-reorder in the group editors */
 .spk-drag {
@@ -368,7 +368,7 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   font-size: .74rem; font-weight: 600;
   margin-top: .12rem;
 }
-.st-line .st-li-ic { flex: 0 0 .8rem; text-align: center; opacity: .38; font-size: .85em; align-self: center; }
+.st-line .st-li-ic { flex: 0 0 .8rem; text-align: center; opacity: .25; font-size: .85em; align-self: center; }
 .st-line .st-li-tag { color: var(--ink); font-weight: 600; font-size: .68rem; white-space: nowrap; }
 .st-off .st-li-tag { color: var(--ink-soft); }
 .st-line .st-li-name {

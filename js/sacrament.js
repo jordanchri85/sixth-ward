@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788121428";
-import { ctx, hasRole } from "./app.js?v=1788121428";
+import { db } from "./firebase-init.js?v=1788121529";
+import { ctx, hasRole } from "./app.js?v=1788121529";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788121428";
-import { HYMNS } from "./hymns.js?v=1788121428";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788121529";
+import { HYMNS } from "./hymns.js?v=1788121529";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -623,8 +623,9 @@ function render() {
   const pastBtn = document.getElementById("btn-toggle-past");
   if (pastBtn) {
     pastBtn.textContent = showPast ? "Hide previous Sundays" : "Show previous Sundays";
-    // past Sundays only exist within the current year's view
-    pastBtn.style.display = viewYear === new Date().getFullYear() ? "" : "none";
+    // shown in every year view (even where no Sundays are past yet) so the
+    // control sits in a consistent spot
+    pastBtn.style.display = "";
   }
   if (viewMode === "table") renderTable(wrap);
   else renderCards(wrap);

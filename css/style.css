@@ -378,6 +378,27 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 
 /* combined pills (Prayers / Youth / Speakers): one line per slot inside the pill */
 .st-group { align-items: stretch; }
+/* the Sunday date: larger than the headline pills, with breathing room after it */
+.card-date {
+  font-size: 1.28rem;
+  margin-right: .55rem;
+  vertical-align: middle;
+}
+
+/* quick-add "+" pinned under the last line of a group pill (Speakers) */
+.st-add {
+  align-self: center;
+  margin-top: .18rem;
+  width: 1.05rem; height: 1.05rem;
+  border-radius: 50%;
+  background: rgba(31, 39, 51, .08);
+  color: var(--ink-soft);
+  font-weight: 700; font-size: .8rem; line-height: 1;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.st-add:hover { background: rgba(31, 39, 51, .16); color: var(--ink); }
+
 /* small centered note under a group-pill headline (e.g. Organ / Conduct on Hymns) */
 .st-subhead {
   align-self: center;

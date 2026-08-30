@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788121160";
-import { ctx, hasRole } from "./app.js?v=1788121160";
+import { db } from "./firebase-init.js?v=1788121428";
+import { ctx, hasRole } from "./app.js?v=1788121428";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788121160";
-import { HYMNS } from "./hymns.js?v=1788121160";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788121428";
+import { HYMNS } from "./hymns.js?v=1788121428";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -543,7 +543,7 @@ function statusChips(m, date) {
   // combined pill: a headline plus one line per slot, each line with its own
   // click-to-confirm dot. Green when every slot is named AND confirmed,
   // yellow once anything is named, red/grey when empty.
-  const groupChip = (label, qe, lines, subhead) => {
+  const groupChip = (label, qe, lines, subhead, footer) => {
     const named = lines.filter((l) => l.name);
     const allDone = lines.length > 0 && named.length === lines.length && lines.every((l) => l.confirmed);
     const cls = named.length === 0 ? (planned ? "st-miss" : "st-off") : allDone ? "st-ok" : "st-pending";
@@ -558,7 +558,7 @@ function statusChips(m, date) {
     }).join("");
     // no icon in the headline — the title stays cleanly centered; state
     // lives in the pill color and the per-line marks
-    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${subhead ? `<span class="st-subhead">${subhead}</span>` : ""}${body}</span>`;
+    return `<span class="st st-group ${cls}${can ? " st-click" : ""}"${can ? ` data-qe='${JSON.stringify(qe)}' title="Click to edit"` : ""}><span class="st-head">${label}</span>${subhead ? `<span class="st-subhead">${subhead}</span>` : ""}${body}${footer || ""}</span>`;
   };
 
   const spkLines = (kind, tagFn) => of(kind).map((it, i) => ({
@@ -590,7 +590,8 @@ function statusChips(m, date) {
   } else if (slotInterHymn) {
     const hymnVal = [slotInterHymn.num ? "#" + slotInterHymn.num : "", slotInterHymn.title].filter(Boolean).join(" ");
     chips.push(chip("Music Number", hymnVal, { t: "inter" }, true, null));
-  } else {
+  } else if (type !== "fast") {
+    // Fast & Testimony has no intermediate slot — skip the empty pill there
     chips.push(`<span class="st st-off${can ? " st-click" : ""}"${can ? ` data-qe='{"t":"inter"}' title="Click to add"` : ""}><span class="st-head">Music Number</span></span>`);
   }
 
@@ -600,10 +601,12 @@ function statusChips(m, date) {
     ...spkLines("primarySpeaker", (it, i) => prim.length > 1 ? `Primary ${i + 1}` : "Primary"),
     ...spkLines("youthSpeaker", (it, i) => yth.length > 1 ? `Youth ${i + 1}` : "Youth"),
   ];
-  if (youthLines.length) chips.push(groupChip("Youth", { t: "py" }, youthLines));
+  if (youthLines.length) chips.push(groupChip("Youth Speakers", { t: "py" }, youthLines));
   if (adultSpk.length) {
+    // "+" under the last speaker line: opens the editor with a fresh row ready
+    const addBtn = can ? `<span class="st-add" data-qe='${JSON.stringify({ t: "spk", k: "speaker", add: 1 })}' title="Add another speaker">+</span>` : "";
     chips.push(groupChip("Speakers", { t: "spk", k: "speaker" },
-      spkLines("speaker", (it, i) => String(i + 1))));
+      spkLines("speaker", (it, i) => String(i + 1)), null, addBtn));
   }
 
   return `<div class="st-row">${chips.join("")}</div>`;
@@ -683,7 +686,7 @@ function renderCards(wrap) {
     <div class="card ${isConf ? "conf-card" : ""}" data-date="${date}" style="${isPast ? "opacity:.6" : ""}">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap">
         <div>
-          <h3 style="margin:0">${fmtDay(date, { year: true })}
+          <h3 style="margin:0"><span class="card-date">${fmtDay(date, { year: true })}</span>
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
             ${megaphone}${wbIcon}${type !== "sacrament" ? `<span class="pill head-pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}">${esc(typeLabel(m, date))}</span>` : ""}${nth === 5 ? `<span class="nth-pill nth-5 head-pill">5th Sunday</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold head-pill">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}
           </h3>
@@ -1198,6 +1201,11 @@ function quickEdit(date, q) {
     dragPrayer = false;
     el.querySelectorAll(".qe-prayer-sect").forEach((s) => s.classList.remove("drop-target"));
   });
+
+  // "+" on the Speakers pill: arrive with a fresh row inserted and focused
+  if ((q.t === "spk" || q.t === "py") && q.add) {
+    el.querySelector(`[data-spkadd="${q.t === "py" ? "youthSpeaker" : q.k}"]`)?.click();
+  }
 
   // intermediate slot: Hymn / Special Musical # / Choir toggle
   el.querySelectorAll("[data-inter-mode]").forEach((btn) =>

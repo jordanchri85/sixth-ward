@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788125968";
-import { ctx, hasRole } from "./app.js?v=1788125968";
+import { db } from "./firebase-init.js?v=1788126329";
+import { ctx, hasRole } from "./app.js?v=1788126329";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788125968";
-import { HYMNS } from "./hymns.js?v=1788125968";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788126329";
+import { HYMNS } from "./hymns.js?v=1788126329";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1557,10 +1557,12 @@ function renderAgendaView(m, canEdit = false) {
     } else {
       val = esc(it.text || "");
     }
-    // the closing block (closing hymn + prayer) groups behind its own divider
-    const breakBefore = it.kind === "closingHymn" ? `<div class="ag-head-break"></div>` : "";
+    // dividers fence the opening block (opening hymn + prayer) and the
+    // closing block (closing hymn + prayer) into their own groups
+    const breakBefore = it.kind === "closingHymn" || it.kind === "openingHymn" ? `<div class="ag-head-break"></div>` : "";
+    const breakAfter = it.kind === "invocation" ? `<div class="ag-head-break"></div>` : "";
     // sacrament hymn joins the blue administration band as one grouped block
-    return breakBefore + row(label, val, it.time || "", itemIdx, it.kind === "sacramentHymn" ? "ag-sac-hymn" : "") + extraBelow;
+    return breakBefore + row(label, val, it.time || "", itemIdx, it.kind === "sacramentHymn" ? "ag-sac-hymn" : "") + extraBelow + breakAfter;
   }).join("");
   const totalRow = `<div class="ag-row ag-total"><span class="ag-val"></span><span class="ag-clock">ends ~${fmtClock(curClock)}</span><span class="ag-time">${totalMin} min</span></div>`;
   return `<div class="agenda-view" style="margin-top:.6rem">${head}${items}${totalRow}${m.notes ? row("Notes", esc(m.notes)) : ""}</div>`;

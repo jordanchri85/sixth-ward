@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788126329";
-import { ctx, hasRole } from "./app.js?v=1788126329";
+import { db } from "./firebase-init.js?v=1788126775";
+import { ctx, hasRole } from "./app.js?v=1788126775";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788126329";
-import { HYMNS } from "./hymns.js?v=1788126329";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788126775";
+import { HYMNS } from "./hymns.js?v=1788126775";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1455,6 +1455,7 @@ function viewMeeting(date) {
       ${m.theme ? `<div class="theme-tag" style="margin-top:.2rem">“${esc(m.theme)}”</div>` : ""}</h3>
     <div id="ag-wrap">${renderAgendaView(m, canEdit)}</div>
     <div class="modal-actions">
+      <button class="btn" id="vw-print" title="Print or save as PDF">🖨 Print</button>
       <div class="right">
         <button class="btn" id="vw-close">Close</button>
         ${canEdit ? `<button class="btn btn-primary" id="vw-edit">Edit</button>` : ""}
@@ -1462,6 +1463,27 @@ function viewMeeting(date) {
     </div>`);
   el.querySelector("#vw-close").addEventListener("click", closeModal);
   el.querySelector("#vw-edit")?.addEventListener("click", () => { closeModal(); editMeeting(date); });
+  // Print: swap in a clean print-only copy of the agenda and open the system
+  // print dialog (which includes Save as PDF)
+  el.querySelector("#vw-print").addEventListener("click", () => {
+    const cur = meetings[date] || m;
+    const holder = document.createElement("div");
+    holder.id = "print-agenda";
+    holder.innerHTML = `
+      <h2 style="margin:0 0 .15rem">Sacrament Meeting</h2>
+      <div style="color:#5b6675;margin-bottom:.8rem">${fmtDay(date, { year: true })}${nthSunday(date) === 5 ? " · 5th Sunday" : ""}${cur.type !== "sacrament" ? " · " + esc(typeLabel(cur, date)) : ""}</div>
+      ${renderAgendaView(cur, false)}`;
+    document.body.appendChild(holder);
+    document.body.classList.add("printing");
+    const cleanup = () => {
+      holder.remove();
+      document.body.classList.remove("printing");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    window.print();
+    setTimeout(cleanup, 1500); // fallback for browsers that skip afterprint
+  });
   if (!canEdit) return;
   const refresh = () => { el.querySelector("#ag-wrap").innerHTML = renderAgendaView(meetings[date] || m, canEdit); };
   const inlineNum = (holder, curVal, style, onCommit) => {
@@ -1525,6 +1547,10 @@ function renderAgendaView(m, canEdit = false) {
     if (it.kind === "sacrament" || it.kind === "blessing") {
       const who = it.kind === "blessing" ? [it.priest1, it.priest2].filter(Boolean).join(" & ") : "";
       return `<div class="ag-row ag-sacrament"><span class="ag-sac-label">${esc(KINDS[it.kind].label)}${who ? ` <span class="ag-sac-who">· ${esc(who)}</span>` : ""}</span>${it.time ? timeCell(it.time, itemIdx) : ""}</div>`;
+    }
+    // testimonies get their own tall centered band (fast Sundays)
+    if (it.kind === "testimonies") {
+      return `<div class="ag-row ag-sacrament ag-testimonies"><span class="ag-sac-label">${esc(KINDS.testimonies.label)}</span>${it.time ? timeCell(it.time, itemIdx) : ""}</div>`;
     }
     // primary/youth slots with nobody assigned (or marked none) stay off the agenda
     if ((it.kind === "primarySpeaker" || it.kind === "youthSpeaker") && (it.none || !it.name)) return "";

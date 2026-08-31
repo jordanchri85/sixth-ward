@@ -465,7 +465,8 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st > :last-child { margin-bottom: auto; }
 
 /* Bishopric board: the calling flow reads left → right on desktop */
-.bishopric-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; align-items: start; }
+/* columns stretch together — the tallest sets the height for all three */
+.bishopric-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; align-items: stretch; }
 @media (max-width: 950px) { .bishopric-board { grid-template-columns: 1fr; } }
 .bb-col { margin-top: .8rem; }
 .bb-drop { min-height: 3.5rem; border-radius: 8px; }

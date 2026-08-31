@@ -1,17 +1,17 @@
 // App shell: auth flow, role gating, tab routing.
-import { auth, db, googleProvider, BISHOP_EMAIL } from "./firebase-init.js?v=1788148798";
+import { auth, db, googleProvider, BISHOP_EMAIL } from "./firebase-init.js?v=1788149155";
 import {
   signInWithPopup, signOut, onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   doc, getDoc, setDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { initTasks } from "./tasks.js?v=1788148798";
-import { initSacrament } from "./sacrament.js?v=1788148798";
-import { initCalendar } from "./calendar.js?v=1788148798";
-import { initCallings } from "./callings.js?v=1788148798";
-import { initConfidential } from "./confidential.js?v=1788148798";
-import { initAdmin } from "./admin.js?v=1788148798";
+import { initTasks } from "./tasks.js?v=1788149155";
+import { initSacrament } from "./sacrament.js?v=1788149155";
+import { initCalendar } from "./calendar.js?v=1788149155";
+import { initCallings } from "./callings.js?v=1788149155";
+import { initConfidential } from "./confidential.js?v=1788149155";
+import { initAdmin } from "./admin.js?v=1788149155";
 
 const ROLE_RANK = { pending: 0, member: 1, bishopric: 2, bishop: 3 };
 
@@ -102,13 +102,13 @@ onAuthStateChanged(auth, async (user) => {
   if (hasRole("bishopric")) initCallings();
   if (hasRole("bishop")) { initConfidential(); initAdmin(); }
 
-  selectTab(localStorage.getItem("sw-tab") || "tasks");
+  selectTab(localStorage.getItem("sw-tab") || "sacrament");
 });
 
 // ---- Tabs ----
 function selectTab(name) {
   const tab = document.querySelector(`.tab[data-tab="${name}"]`);
-  if (!tab || tab.classList.contains("hidden")) name = "tasks";
+  if (!tab || tab.classList.contains("hidden")) name = "sacrament";
   document.querySelectorAll(".tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) =>

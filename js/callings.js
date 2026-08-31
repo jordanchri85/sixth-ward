@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788148798";
+import { db } from "./firebase-init.js?v=1788149155";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788148798";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149155";
 
 const CALL_STAGES = [
   ["fill", "Filling"],
@@ -115,6 +115,7 @@ const acceptedRow = (c) => `
     </div>
     <button class="chip ${c.sustained ? "active" : ""}" data-tgl="sustained" type="button">Sustained</button>
     <button class="chip ${c.setApart ? "active" : ""}" data-tgl="setApart" type="button">Set apart</button>
+    <button class="btn btn-sm" data-advfull="1" type="button" title="Mark sustained &amp; set apart and send to the clerk column">→</button>
   </div>`;
 
 const clerkRow = (c) => `
@@ -164,20 +165,24 @@ function render() {
   const members = items.filter((i) => i.kind === "member");
   const by = (st) => callings.filter((c) => c.stage === st);
 
-  const bucket = (title, sub, rows, empty) => `
-    <div class="card" style="margin-top:.8rem">
+  const bucket = (title, sub, rows, empty, dropStage) => `
+    <div class="card${dropStage ? " bb-col" : ""}" style="margin-top:.8rem">
       <h3 style="display:flex;align-items:center;gap:.5rem">${title} <span class="pill pill-role-member">${rows.length}</span></h3>
       <p class="row-sub" style="margin:0 0 .3rem">${sub}</p>
-      ${rows.length ? rows.join("") : `<div class="empty-note">${empty}</div>`}
+      <div${dropStage ? ` class="bb-drop" data-stage="${dropStage}"` : ""}>${rows.length ? rows.join("") : `<div class="empty-note">${empty}</div>`}</div>
     </div>`;
 
+  // the calling flow reads left → right on desktop; drag a row to the next
+  // column or use its arrow button
   wrap.innerHTML =
-    bucket("Callings to Fill", "Names under consideration — ★ marks the one the bishopric settled on.",
-      by("fill").map(fillRow), "Nothing waiting to be filled.") +
-    bucket("Awaiting Sustaining & Setting Apart", "Call issued and accepted. Tick each step as it happens.",
-      by("accepted").map(acceptedRow), "No accepted calls waiting.") +
-    bucket("Waiting on Membership Clerk", "Done at church — waiting to be recorded in the Church system.",
-      by("clerk").map(clerkRow), "Nothing waiting on the clerk.") +
+    `<div class="bishopric-board">` +
+    bucket("Callings to Fill", "Names under consideration — ★ marks the settled name.",
+      by("fill").map(fillRow), "Nothing waiting to be filled.", "fill") +
+    bucket("Awaiting Sustaining & Setting Apart", "Call issued and accepted. Tick each step.",
+      by("accepted").map(acceptedRow), "No accepted calls waiting.", "accepted") +
+    bucket("Waiting on Membership Clerk", "Waiting to be recorded in the Church system.",
+      by("clerk").map(clerkRow), "Nothing waiting on the clerk.", "clerk") +
+    `</div>` +
     bucket("Releases", "Decided → notified → released → recorded by the clerk.",
       releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.") +
     bucket("Members who need callings", "The pool to draw from as positions open up.",
@@ -198,6 +203,11 @@ function render() {
         save(item.id, { stage: t.dataset.adv });
         return;
       }
+      if (t.dataset.advfull) { // arrow: sustained + set apart + on to the clerk
+        e.stopPropagation();
+        save(item.id, { sustained: true, setApart: true, stage: "clerk" });
+        return;
+      }
       if (t.dataset.tgl) { // sustained / set-apart chips; both on → clerk stage
         e.stopPropagation();
         const upd = { [t.dataset.tgl]: !item[t.dataset.tgl] };
@@ -210,6 +220,46 @@ function render() {
       if (item.kind === "member") editMember(item);
       else if (item.kind === "release") editRelease(item);
       else editCalling(item);
+    });
+  });
+
+  // drag a calling row between the three flow columns
+  let dragId = null;
+  document.querySelectorAll("#panel-callings .bb-drop .list-row").forEach((row) => {
+    row.draggable = true;
+    row.addEventListener("dragstart", (e) => {
+      dragId = row.dataset.id;
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", ""); } catch { /* older browsers */ }
+    });
+    row.addEventListener("dragend", () => {
+      dragId = null;
+      document.querySelectorAll(".bb-drop").forEach((z) => z.classList.remove("bb-over"));
+    });
+  });
+  document.querySelectorAll("#panel-callings .bb-drop").forEach((zone) => {
+    zone.addEventListener("dragover", (e) => {
+      if (!dragId) return;
+      e.preventDefault();
+      zone.classList.add("bb-over");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("bb-over"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("bb-over");
+      const it = items.find((x) => x.id === dragId);
+      dragId = null;
+      if (!it || it.kind !== "calling") return;
+      const st = zone.dataset.stage;
+      if (!st || st === it.stage) return;
+      if (st !== "fill" && !it.decided && !(it.candidates || [])[0]) {
+        toast("Add a name (and star it) before moving this forward");
+        return;
+      }
+      const upd = { stage: st };
+      if (st !== "fill" && !it.decided) upd.decided = (it.candidates || [])[0];
+      if (st === "clerk") { upd.sustained = true; upd.setApart = true; }
+      save(it.id, upd);
     });
   });
 }

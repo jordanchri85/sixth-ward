@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788150645";
+import { db } from "./firebase-init.js?v=1788150956";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150645";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150956";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -144,9 +144,7 @@ const issueRow = (c) => `
     <div class="row-main">
       <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
       <div class="row-title">★ ${esc(c.decided || "—")}</div>
-      <div class="row-sub">Decided — issue the call</div>
     </div>
-    <span class="pill pill-accepted" data-undecide="1" style="cursor:pointer" title="Click to move back to considering">Decided</span>
     <button class="btn btn-sm" data-adv="sustain" type="button" title="${esc(c.decided || "")} accepted the call">Call accepted →</button>
   </div>`;
 

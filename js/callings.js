@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788149155";
+import { db } from "./firebase-init.js?v=1788149338";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149155";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149338";
 
 const CALL_STAGES = [
   ["fill", "Filling"],
@@ -165,9 +165,9 @@ function render() {
   const members = items.filter((i) => i.kind === "member");
   const by = (st) => callings.filter((c) => c.stage === st);
 
-  const bucket = (title, sub, rows, empty, dropStage) => `
+  const bucket = (title, sub, rows, empty, dropStage, addKind) => `
     <div class="card${dropStage ? " bb-col" : ""}" style="margin-top:.8rem">
-      <h3 style="display:flex;align-items:center;gap:.5rem">${title} <span class="pill pill-role-member">${rows.length}</span></h3>
+      <h3 style="display:flex;align-items:center;gap:.5rem">${title} <span class="pill pill-role-member">${rows.length}</span>${addKind ? `<button class="btn btn-sm" data-add="${addKind}" type="button" style="margin-left:auto" title="Add">+</button>` : ""}</h3>
       <p class="row-sub" style="margin:0 0 .3rem">${sub}</p>
       <div${dropStage ? ` class="bb-drop" data-stage="${dropStage}"` : ""}>${rows.length ? rows.join("") : `<div class="empty-note">${empty}</div>`}</div>
     </div>`;
@@ -177,16 +177,16 @@ function render() {
   wrap.innerHTML =
     `<div class="bishopric-board">` +
     bucket("Callings to Fill", "Names under consideration — ★ marks the settled name.",
-      by("fill").map(fillRow), "Nothing waiting to be filled.", "fill") +
+      by("fill").map(fillRow), "Nothing waiting to be filled.", "fill", "calling") +
     bucket("Awaiting Sustaining & Setting Apart", "Call issued and accepted. Tick each step.",
       by("accepted").map(acceptedRow), "No accepted calls waiting.", "accepted") +
     bucket("Waiting on Membership Clerk", "Waiting to be recorded in the Church system.",
       by("clerk").map(clerkRow), "Nothing waiting on the clerk.", "clerk") +
     `</div>` +
     bucket("Releases", "Decided → notified → released → recorded by the clerk.",
-      releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.") +
+      releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.", null, "release") +
     bucket("Members who need callings", "The pool to draw from as positions open up.",
-      members.map(memberRow), "No one on the list.");
+      members.map(memberRow), "No one on the list.", null, "member");
 
   const doneItems = [...callings.filter((c) => c.stage === "done"), ...releases.filter((r) => r.stage === "done")];
   const doneList = document.getElementById("calling-done");
@@ -222,6 +222,15 @@ function render() {
       else editCalling(item);
     });
   });
+
+  // "+" on a bucket header opens the matching creator
+  document.querySelectorAll("#panel-callings [data-add]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (b.dataset.add === "calling") editCalling(null);
+      else if (b.dataset.add === "release") editRelease(null);
+      else editMember(null);
+    }));
 
   // drag a calling row between the three flow columns
   let dragId = null;

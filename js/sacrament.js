@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788149338";
-import { ctx, hasRole } from "./app.js?v=1788149338";
+import { db } from "./firebase-init.js?v=1788149831";
+import { ctx, hasRole } from "./app.js?v=1788149831";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788149338";
-import { HYMNS } from "./hymns.js?v=1788149338";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788149831";
+import { HYMNS } from "./hymns.js?v=1788149831";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed

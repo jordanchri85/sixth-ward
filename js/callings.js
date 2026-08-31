@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788149338";
+import { db } from "./firebase-init.js?v=1788149831";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149338";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149831";
 
 const CALL_STAGES = [
   ["fill", "Filling"],
@@ -90,6 +90,25 @@ export function initCallings() {
 const save = (id, data) => updateDoc(doc(db, "callings", id), { ...data, updatedAt: serverTimestamp() });
 
 // ---- rows ----
+// each calling gets a consistently colored pill so it's easy to single out;
+// known organizations keep fixed colors, everything else hashes to one
+const ORG_COLORS = {
+  "relief society": "#cf6d96", "elders quorum": "#6b96c9", "primary": "#dd9257",
+  "young men": "#74a67f", "young women": "#a37fc0", "sunday school": "#b98a2f",
+  "bishopric": "#5b8fa8", "ward": "#5b8fa8",
+};
+const PILL_COLORS = ["#cf6d96", "#6b96c9", "#dd9257", "#74a67f", "#a37fc0", "#b98a2f", "#5b8fa8", "#c96b6b"];
+const callingPill = (label, orgKey) => {
+  const key = (orgKey || label || "").toLowerCase().trim();
+  let bg = ORG_COLORS[key];
+  if (!bg) {
+    let h = 0;
+    for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    bg = PILL_COLORS[h % PILL_COLORS.length];
+  }
+  return `<span class="call-pill" style="background:${bg}">${esc(label)}</span>`;
+};
+
 const fillRow = (c) => {
   const cands = c.candidates || [];
   const sub = cands.length
@@ -98,7 +117,7 @@ const fillRow = (c) => {
   return `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
-      <div class="row-title">${esc(c.calling)}${c.organization ? ` <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.organization)}</span>` : ""}</div>
+      <div class="row-title">${callingPill(c.calling, c.organization)}${c.organization ? ` <span style="color:var(--ink-soft);font-weight:400;font-size:.8rem">${esc(c.organization)}</span>` : ""}</div>
       <div class="row-sub">${sub}</div>
     </div>
     ${c.decided
@@ -110,7 +129,7 @@ const fillRow = (c) => {
 const acceptedRow = (c) => `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
-      <div class="row-title">${esc(c.decided || "—")} <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.calling)}</span></div>
+      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
       <div class="row-sub">Accepted — waiting to be sustained and set apart</div>
     </div>
     <button class="chip ${c.sustained ? "active" : ""}" data-tgl="sustained" type="button">Sustained</button>
@@ -121,7 +140,7 @@ const acceptedRow = (c) => `
 const clerkRow = (c) => `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
-      <div class="row-title">${esc(c.decided || "—")} <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.calling)}</span></div>
+      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
       <div class="row-sub">Sustained &amp; set apart — waiting for the clerk to record it</div>
     </div>
     <button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>
@@ -132,7 +151,7 @@ const releaseRow = (r) => {
   return `
   <div class="list-row" data-id="${r.id}">
     <div class="row-main">
-      <div class="row-title">${esc(r.name)}${r.calling ? ` <span style="color:var(--ink-soft);font-weight:400">· ${esc(r.calling)}</span>` : ""}</div>
+      <div class="row-title">${esc(r.name)}${r.calling ? ` ${callingPill(r.calling)}` : ""}</div>
       <div class="row-sub">${r.notes ? esc(r.notes.slice(0, 70)) : "Release"}</div>
     </div>
     <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}">${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>

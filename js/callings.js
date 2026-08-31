@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788150023";
+import { db } from "./firebase-init.js?v=1788150185";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150023";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150185";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -104,7 +104,7 @@ const ORG_COLORS = {
   "bishopric": "#5b8fa8", "ward": "#5b8fa8",
 };
 const PILL_COLORS = ["#cf6d96", "#6b96c9", "#dd9257", "#74a67f", "#a37fc0", "#b98a2f", "#5b8fa8", "#c96b6b"];
-const callingPill = (label, orgKey) => {
+const callColor = (label, orgKey) => {
   const key = (orgKey || label || "").toLowerCase().trim();
   let bg = ORG_COLORS[key];
   if (!bg) {
@@ -112,18 +112,23 @@ const callingPill = (label, orgKey) => {
     for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     bg = PILL_COLORS[h % PILL_COLORS.length];
   }
-  return `<span class="call-pill" style="background:${bg}">${esc(label)}</span>`;
+  return bg;
+};
+// the whole card is one big tinted pill in the calling's color
+const cardStyle = (label, orgKey) => {
+  const col = callColor(label, orgKey);
+  return `style="background:${col}1c;border:1px solid ${col}55" data-col="${col}"`;
 };
 
 const fillRow = (c) => {
   const cands = c.candidates || [];
   const sub = cands.length
-    ? cands.map((n) => n === c.decided ? `<b>★ ${esc(n)}</b>` : esc(n)).join(" · ")
+    ? cands.map((n) => n === c.decided ? `<div><b>★ ${esc(n)}</b></div>` : `<div>${esc(n)}</div>`).join("")
     : "No names yet";
   return `
-  <div class="list-row" data-id="${c.id}">
+  <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
-      <div class="row-title">${callingPill(c.calling, c.organization)}${c.organization ? ` <span style="color:var(--ink-soft);font-weight:400;font-size:.8rem">${esc(c.organization)}</span>` : ""}</div>
+      <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}${c.organization ? ` <span class="call-card-org">· ${esc(c.organization)}</span>` : ""}</div>
       <div class="row-sub">${sub}</div>
     </div>
     ${c.decided
@@ -133,27 +138,30 @@ const fillRow = (c) => {
 };
 
 const calledRow = (c) => `
-  <div class="list-row" data-id="${c.id}">
+  <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
-      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
+      <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
+      <div class="row-title">${esc(c.decided || "—")}</div>
       <div class="row-sub">Call accepted — awaiting sustaining</div>
     </div>
     <button class="btn btn-sm" data-adv="sustained" type="button">Sustained →</button>
   </div>`;
 
 const sustainedRow = (c) => `
-  <div class="list-row" data-id="${c.id}">
+  <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
-      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
+      <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
+      <div class="row-title">${esc(c.decided || "—")}</div>
       <div class="row-sub">Sustained — awaiting setting apart</div>
     </div>
     <button class="btn btn-sm" data-adv="setapart" type="button">Set apart →</button>
   </div>`;
 
 const setApartRow = (c) => `
-  <div class="list-row" data-id="${c.id}">
+  <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
-      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
+      <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
+      <div class="row-title">${esc(c.decided || "—")}</div>
       <div class="row-sub">Set apart — waiting for the clerk to record it</div>
     </div>
     <button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>
@@ -162,9 +170,10 @@ const setApartRow = (c) => `
 const releaseRow = (r) => {
   const next = { decided: ["notified", "Notified →"], notified: ["released", "Released →"], released: ["done", "Clerk updated ✓"] }[r.stage];
   return `
-  <div class="list-row" data-id="${r.id}">
+  <div class="list-row call-card" data-id="${r.id}" ${cardStyle(r.calling || r.name)}>
     <div class="row-main">
-      <div class="row-title">${esc(r.name)}${r.calling ? ` ${callingPill(r.calling)}` : ""}</div>
+      ${r.calling ? `<div class="call-card-title" style="color:${callColor(r.calling)}">${esc(r.calling)}</div>` : ""}
+      <div class="row-title">${esc(r.name)}</div>
       <div class="row-sub">${r.notes ? esc(r.notes.slice(0, 70)) : "Release"}</div>
     </div>
     <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}">${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>

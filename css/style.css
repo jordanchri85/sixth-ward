@@ -474,17 +474,19 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .bb-drop .list-row { cursor: grab; flex-wrap: wrap; }
 .bb-drop.bb-over { outline: 2px dashed var(--brand); outline-offset: 3px; background: var(--brand-soft); }
 
-/* each calling wears a colored pill so it stands out in a long list */
-.call-pill {
-  display: inline-block;
-  color: #fff;
-  font-weight: 600; font-size: .78rem;
-  padding: .16rem .6rem;
-  border-radius: 99px;
-  vertical-align: middle;
-  white-space: nowrap;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+/* each calling is one large tinted capsule — title in the calling's color,
+   candidate names grouped inside it */
+.call-card {
+  border-radius: 12px;
+  border-bottom: none !important;
+  padding: .6rem .75rem;
+  margin-bottom: .5rem;
+  align-items: center;
 }
+.call-card:hover { filter: brightness(.97); background-clip: padding-box; }
+.call-card-title { font-weight: 700; font-size: .92rem; line-height: 1.25; }
+.call-card-org { font-weight: 500; font-size: .78rem; opacity: .75; }
+.call-card .row-sub { color: var(--ink); opacity: .8; }
 
 /* callings: candidate star — grey until it's the settled-on name */
 .cand-star { color: #c9cfd6; padding: .3rem .45rem; }

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788147821";
-import { ctx, hasRole } from "./app.js?v=1788147821";
+import { db } from "./firebase-init.js?v=1788148437";
+import { ctx, hasRole } from "./app.js?v=1788148437";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788147821";
-import { HYMNS } from "./hymns.js?v=1788147821";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788148437";
+import { HYMNS } from "./hymns.js?v=1788148437";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -743,11 +743,15 @@ function renderCards(wrap) {
     // (members unchecked as "at church this week" don't count)
     const hbCur = planned ? m.hbAssign || {} : {};
     const hbSkip = planned ? m.hbSkip || [] : [];
+    // per-week switch: grey when off, highlighted when enabled (green once
+    // everyone who needs a visit is covered). Older weeks with saved
+    // assignments but no flag count as enabled.
+    const hbOn = planned && (m.hbOn ?? Object.keys(hbCur).length > 0);
     const hbNeeded = homebound.filter((p) => !hbSkip.includes(p.id));
     const hbAssigned = hbNeeded.filter((p) => hbCur[p.id]).length;
     const hbDone = hbNeeded.length === 0 || hbAssigned === hbNeeded.length;
     const hbIcon = homebound.length && !isConf ? `
-      <button class="megaphone-btn${hbDone ? " has-wb" : hbAssigned ? " has-announce" : ""}" data-hbicon="${date}" title="Homebound sacrament: ${hbAssigned} of ${hbNeeded.length} assigned${hbSkip.length ? ` · ${hbSkip.length} at church` : ""}">
+      <button class="megaphone-btn${hbOn ? (hbDone ? " has-wb" : " has-announce") : ""}" data-hbicon="${date}" title="${hbOn ? `Homebound sacrament: ${hbAssigned} of ${hbNeeded.length} assigned${hbSkip.length ? ` · ${hbSkip.length} at church` : ""}` : "Homebound sacrament: off this week — click to set up"}">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m3 9.5 9-7 9 7V20a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20z"/>
           <path d="M9 21.5v-8h6v8"/>
@@ -1500,8 +1504,11 @@ function hbModal(date) {
     toast(canEdit ? "No homebound members yet — add them under ⚙ Settings" : "No homebound members on the list");
     return;
   }
-  const cur = meetings[date]?.hbAssign || {};
-  const off = new Set(meetings[date]?.hbSkip || []);
+  const m0 = meetings[date];
+  const cur = m0?.hbAssign || {};
+  const off = new Set(m0?.hbSkip || []);
+  // per-week switch; older weeks with saved assignments count as enabled
+  let on = m0?.hbOn ?? Object.keys(cur).length > 0;
   // groups of two brethren; by default one group covers every home.
   // Reconstructed from the saved per-member strings (unique values = groups).
   let sets = [];
@@ -1528,34 +1535,62 @@ function hbModal(date) {
       </div>
     </div>`);
 
+  const memberRow = (p) => {
+    const o = off.has(p.id);
+    const multi = sets.length > 1;
+    return `
+      <div class="speaker-row hb-row${o ? " hb-off" : ""}${multi && !o ? " hb-inset" : ""}" data-pid="${esc(p.id)}">
+        <div style="flex:1;min-width:0">
+          <div class="hb-nm" title="Click to toggle: not needed this week (they'll be at church)">${esc(p.name)} <span class="hb-flag">Not needed</span></div>
+          ${p.address ? `<div class="row-sub">${esc(p.address)}</div>` : ""}
+        </div>
+        ${multi && !o ? `<div class="chips">${sets.map((_, i) => `<button class="chip hb-pick ${(memberSet[p.id] ?? 0) === i ? "active" : ""}" data-g="${i}" type="button" title="Move to group ${i + 1}">${i + 1}</button>`).join("")}</div>` : ""}
+      </div>`;
+  };
+
   const rerender = () => {
     const multi = sets.length > 1;
-    const ordered = [...homebound].sort((x, y) => (off.has(x.id) ? 1 : 0) - (off.has(y.id) ? 1 : 0));
-    const setsHtml = canEdit ? `
-      <div class="row-sub" style="font-weight:700;margin-bottom:.25rem">Assigned Brethren</div>
-      ${sets.map((s, i) => `
+    const toggle = canEdit ? `<div style="margin-bottom:.7rem"><button class="chip hb-onoff ${on ? "active" : ""}" type="button">${on ? "✓ Enabled this Sunday" : "Off this Sunday — tap to enable"}</button></div>` : "";
+    if (!on) {
+      el.querySelector("#hb-body").innerHTML = toggle + `<div class="empty-note">${canEdit ? "Not taking the sacrament out this week." : "No homebound sacrament this week."}</div>`;
+      return;
+    }
+    let body = toggle;
+    if (canEdit) {
+      body += `<div class="row-sub" style="font-weight:700;margin-bottom:.25rem">Assigned Brethren</div>`;
+      // when split, each member sits under the group of brethren covering them
+      const activeOf = (i) => homebound.filter((p) => !off.has(p.id) && (memberSet[p.id] ?? 0) === i);
+      body += sets.map((s, i) => `
         <div class="speaker-row hb-set-row" data-set="${i}">
           ${multi ? `<span class="hb-set-tag">Group ${i + 1}</span>` : ""}
           <input class="hb-s1" autocomplete="off" value="${esc(s[0])}">
           <input class="hb-s2" autocomplete="off" value="${esc(s[1])}">
           ${multi ? `<button class="btn btn-sm hb-setdel" type="button" title="Remove this group">✕</button>` : ""}
-        </div>`).join("")}
-      <button class="btn btn-sm" id="hb-addset" type="button">+ Split into another group</button>
-      <div style="display:flex;gap:.75rem;margin:.9rem 0 .2rem"><span class="row-sub" style="flex:1;font-weight:700">Member</span>${multi ? `<span class="row-sub" style="font-weight:700">Group</span>` : ""}</div>`
-      : `<div class="row-sub" style="font-weight:700;margin-bottom:.2rem">Member</div>`;
-    const rowsHtml = ordered.map((p) => {
-      const o = off.has(p.id);
-      return `
-      <div class="speaker-row hb-row${o ? " hb-off" : ""}" data-pid="${esc(p.id)}">
-        <div style="flex:1;min-width:0">
-          <div class="hb-nm"${canEdit ? ` title="Click to toggle: not needed this week (they'll be at church)"` : ""}>${esc(p.name)} <span class="hb-flag">Not needed</span></div>
-          ${p.address ? `<div class="row-sub">${esc(p.address)}</div>` : ""}
         </div>
-        ${canEdit && multi && !o ? `<div class="chips">${sets.map((_, i) => `<button class="chip hb-pick ${memberSet[p.id] === i ? "active" : ""}" data-g="${i}" type="button">${i + 1}</button>`).join("")}</div>` : ""}
-        ${!canEdit ? `<div style="flex:1">${o ? `<span class="row-sub">Not needed this week</span>` : cur[p.id] ? esc(cur[p.id]) : `<span class="row-sub">— not assigned yet</span>`}</div>` : ""}
-      </div>`;
-    }).join("");
-    el.querySelector("#hb-body").innerHTML = setsHtml + rowsHtml;
+        ${multi ? `<div class="hb-group-members">${activeOf(i).map(memberRow).join("") || `<div class="row-sub hb-inset" style="padding:.15rem 0 .45rem">No homes in this group — use the number chips to move members here.</div>`}</div>` : ""}`).join("");
+      body += `<button class="btn btn-sm" id="hb-addset" type="button">+ Split into another group</button>`;
+      if (!multi) {
+        body += `<div class="row-sub" style="font-weight:700;margin:.9rem 0 .2rem">Member</div>`;
+        body += homebound.filter((p) => !off.has(p.id)).map(memberRow).join("");
+      }
+      const offList = homebound.filter((p) => off.has(p.id));
+      if (offList.length) body += `<div style="margin-top:.5rem">${offList.map(memberRow).join("")}</div>`;
+    } else {
+      body += `<div class="row-sub" style="font-weight:700;margin-bottom:.2rem">Member</div>`;
+      const ordered = [...homebound].sort((x, y) => (off.has(x.id) ? 1 : 0) - (off.has(y.id) ? 1 : 0));
+      body += ordered.map((p) => {
+        const o = off.has(p.id);
+        return `
+        <div class="speaker-row hb-row${o ? " hb-off" : ""}">
+          <div style="flex:1;min-width:0">
+            <div class="hb-nm">${esc(p.name)}</div>
+            ${p.address ? `<div class="row-sub">${esc(p.address)}</div>` : ""}
+          </div>
+          <div style="flex:1">${o ? `<span class="row-sub">Not needed this week</span>` : cur[p.id] ? esc(cur[p.id]) : `<span class="row-sub">— not assigned yet</span>`}</div>
+        </div>`;
+      }).join("");
+    }
+    el.querySelector("#hb-body").innerHTML = body;
   };
   rerender();
 
@@ -1568,6 +1603,7 @@ function hbModal(date) {
     });
   };
   el.addEventListener("click", (e) => {
+    if (e.target.classList.contains("hb-onoff")) { syncSets(); on = !on; rerender(); return; }
     if (e.target.id === "hb-addset") { syncSets(); sets.push(["", ""]); rerender(); return; }
     if (e.target.classList.contains("hb-setdel")) {
       syncSets();
@@ -1584,7 +1620,7 @@ function hbModal(date) {
       memberSet[e.target.closest(".hb-row").dataset.pid] = Number(e.target.dataset.g);
       rerender(); return;
     }
-    if (e.target.closest(".hb-nm")) {
+    if (e.target.closest(".hb-nm") && e.target.closest(".hb-row")) {
       syncSets();
       const pid = e.target.closest(".hb-row").dataset.pid;
       off.has(pid) ? off.delete(pid) : off.add(pid);
@@ -1599,7 +1635,7 @@ function hbModal(date) {
       const v = groupStr(memberSet[p.id] ?? 0);
       if (v) assign[p.id] = v; // kept even for not-needed members, so toggling back restores
     });
-    await patchMeeting(date, (mm) => { mm.hbAssign = assign; mm.hbSkip = [...off]; });
+    await patchMeeting(date, (mm) => { mm.hbAssign = assign; mm.hbSkip = [...off]; mm.hbOn = on; });
     closeModal();
   });
 }

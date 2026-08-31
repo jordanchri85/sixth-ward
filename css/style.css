@@ -319,8 +319,9 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
   vertical-align: middle;
   line-height: 1;
 }
-.megaphone-btn.has-announce { background: var(--brand-soft); color: var(--brand); }
-.megaphone-btn.has-announce:hover { background: #dbe7f2; }
+.megaphone-btn.has-announce { background: #cddff1; color: var(--brand); }
+.megaphone-btn.has-announce:hover { background: #bed5ec; }
+.megaphone-btn.has-announce svg { stroke-width: 2.5; }
 .megaphone-btn.has-wb { background: #e3f2e8; color: var(--ok); }
 .megaphone-btn.has-wb:hover { background: #d5ecdd; }
 .pill-choir-bold {
@@ -477,6 +478,9 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 .hb-set-tag { flex: 0 0 3.9rem; font-size: .75rem; font-weight: 700; color: var(--ink-soft); }
 .hb-row .chips { flex: none; }
+/* members nest under their group's brethren when split */
+.hb-inset { margin-left: 1rem; border-left: 2px solid var(--line); padding-left: .6rem; }
+.hb-group-members { margin-bottom: .5rem; }
 
 /* a "none this week" line reads quiet — it isn't missing, it's decided */
 .st-line .st-none { font-style: italic; font-weight: 500; opacity: .6; }

@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788128283";
-import { ctx, hasRole } from "./app.js?v=1788128283";
+import { db } from "./firebase-init.js?v=1788135964";
+import { ctx, hasRole } from "./app.js?v=1788135964";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788128283";
-import { HYMNS } from "./hymns.js?v=1788128283";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788135964";
+import { HYMNS } from "./hymns.js?v=1788135964";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -26,6 +26,7 @@ const ORG_ABBR = { "Relief Society": "RS", "Elders Quorum": "EQ", "Primary": "Pr
 const DEFAULT_BISHOPRIC = ["Bishop Christensen", "Brother Bennett", "Brother Beach"];
 let bishopric = [...DEFAULT_BISHOPRIC];
 let priests = [];    // ward priests, for Blessing the Sacrament dropdowns
+let homebound = [];  // homebound members: {id, name, address} — sacrament taken to them
 let organists = [];  // suggestions for the Organist field
 let conductors = []; // suggestions for the music Conductor field
 let customHymns = []; // [{num, title}] added under ⚙ Settings, merged into the catalog
@@ -264,6 +265,10 @@ async function loadBishopric() {
       await setDoc(doc(db, "settings", "leadership"), { bishopric: DEFAULT_BISHOPRIC, priests: [], organists: [], conductors: [] });
     }
   } catch { /* keep defaults */ }
+  try {
+    const hb = await getDoc(doc(db, "settings", "homebound"));
+    if (hb.exists() && Array.isArray(hb.data().people)) homebound = hb.data().people;
+  } catch { /* no homebound list yet */ }
   render();
 }
 
@@ -288,6 +293,15 @@ function editBishopric() {
     <p class="row-sub" style="margin:0 0 .5rem">Suggested in the Conductor field each week.</p>
     <div id="cond-rows">${nameRows("cond-name", conductors)}</div>
     <button class="btn btn-sm" id="cond-add" type="button">+ Add conductor</button>
+    <div class="mtg-sec-title" style="margin-top:1.1rem">Homebound members</div>
+    <p class="row-sub" style="margin:0 0 .5rem">Members who receive the sacrament at home. The list stays put week to week — assign who takes it from the 🏠 button on each Sunday's card.</p>
+    <div id="hb-rows">${homebound.map((p) => `
+      <div class="speaker-row" data-pid="${esc(p.id)}">
+        <input class="hb-name" placeholder="Name" value="${esc(p.name || "")}">
+        <input class="hb-addr" placeholder="Address" style="flex:1.4" value="${esc(p.address || "")}">
+        <button class="btn btn-sm set-del" type="button">✕</button>
+      </div>`).join("")}</div>
+    <button class="btn btn-sm" id="hb-add" type="button">+ Add homebound member</button>
     <div class="mtg-sec-title" style="margin-top:1.1rem">Custom hymns</div>
     <p class="row-sub" style="margin:0 0 .5rem">Both hymnbooks are built in. When the Church releases new hymns, add them here and they'll appear in every hymn dropdown.</p>
     <div id="ch-rows">${customHymns.map((h) => `
@@ -315,6 +329,12 @@ function editBishopric() {
   el.querySelector("#pr-add").addEventListener("click", () => addRow("#pr-rows", "pr-name"));
   el.querySelector("#org-add").addEventListener("click", () => addRow("#org-rows", "org-name"));
   el.querySelector("#cond-add").addEventListener("click", () => addRow("#cond-rows", "cond-name"));
+  el.querySelector("#hb-add").addEventListener("click", () => el.querySelector("#hb-rows").insertAdjacentHTML("beforeend", `
+      <div class="speaker-row">
+        <input class="hb-name" placeholder="Name">
+        <input class="hb-addr" placeholder="Address" style="flex:1.4">
+        <button class="btn btn-sm set-del" type="button">✕</button>
+      </div>`));
   el.querySelector("#ch-add").addEventListener("click", () => el.querySelector("#ch-rows").insertAdjacentHTML("beforeend", `
       <div class="speaker-row">
         <input class="ch-num" placeholder="#" inputmode="numeric" style="flex:0 0 5rem">
@@ -334,14 +354,22 @@ function editBishopric() {
       num: row.querySelector(".ch-num").value.trim(),
       title: row.querySelector(".ch-title").value.trim(),
     })).filter((h) => h.num || h.title);
+    // homebound people keep their id across edits so weekly assignments stay linked
+    const hbPeople = [...el.querySelectorAll("#hb-rows .speaker-row")].map((row) => ({
+      id: row.dataset.pid || "hb" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: row.querySelector(".hb-name").value.trim(),
+      address: row.querySelector(".hb-addr").value.trim(),
+    })).filter((p) => p.name);
     try {
       await setDoc(doc(db, "settings", "leadership"),
         { bishopric: names, priests: priestNames, organists: organistNames, conductors: conductorNames, customHymns: hymnRows });
+      await setDoc(doc(db, "settings", "homebound"), { people: hbPeople });
       bishopric = names;
       priests = priestNames;
       organists = organistNames;
       conductors = conductorNames;
       customHymns = hymnRows;
+      homebound = hbPeople;
       closeModal(); toast("Settings saved"); render();
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
@@ -710,6 +738,17 @@ function renderCards(wrap) {
           <path d="M9 12h6M9 16h6"/>
         </svg>
       </button>` : "";
+    // Homebound sacrament: house icon — grey until anyone's assigned, amber
+    // when partial, green when every homebound member has someone assigned
+    const hbCur = planned ? m.hbAssign || {} : {};
+    const hbAssigned = homebound.filter((p) => hbCur[p.id]).length;
+    const hbIcon = homebound.length && !isConf ? `
+      <button class="megaphone-btn${hbAssigned === homebound.length ? " has-wb" : hbAssigned ? " has-announce" : ""}" data-hbicon="${date}" title="Homebound sacrament: ${hbAssigned} of ${homebound.length} assigned">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m3 9.5 9-7 9 7V20a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20z"/>
+          <path d="M9 21.5v-8h6v8"/>
+        </svg>
+      </button>` : "";
     // conducting is assigned or not — no confirmation step
     // plain text, no pill color — assigned reads quietly on the date line
     const condChip = isConf ? "" : `
@@ -720,7 +759,7 @@ function renderCards(wrap) {
         <div>
           <h3 style="margin:0"><span class="card-date">${fmtDay(date, { year: true })}</span>
             ${m?.theme ? `<span class="theme-tag">“${esc(m.theme)}”</span>` : ""}
-            ${megaphone}${wbIcon}${type !== "sacrament" ? `<span class="pill head-pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}">${esc(typeLabel(m, date))}</span>` : ""}${nth === 5 ? `<span class="nth-pill nth-5 head-pill">5th Sunday</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold head-pill">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}
+            ${megaphone}${wbIcon}${hbIcon}${type !== "sacrament" ? `<span class="pill head-pill ${isConf ? "pill-conf" : type === "fast" ? "pill-fast" : "pill-approved"}">${esc(typeLabel(m, date))}</span>` : ""}${nth === 5 ? `<span class="nth-pill nth-5 head-pill">5th Sunday</span>` : ""}${babies.map((b) => `<span class="pill-baby-bold head-pill">Blessing${b.name ? ": " + esc(b.name) : ""}</span>`).join("")}
           </h3>
           <div class="row-sub" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">${condChip}${isConf ? "<span>no sacrament meeting</span>" : ""}</div>
         </div>
@@ -746,6 +785,8 @@ function renderCards(wrap) {
     }));
   wrap.querySelectorAll("[data-addbaby]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); quickAddBaby(b.dataset.addbaby); }));
+  wrap.querySelectorAll("[data-hbicon]").forEach((b) =>
+    b.addEventListener("click", (e) => { e.stopPropagation(); hbModal(b.dataset.hbicon); }));
   wrap.querySelectorAll("[data-qe]").forEach((el) =>
     el.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1445,6 +1486,48 @@ function wbModal(date) {
     </div>`);
   el.querySelector("#wb-close").addEventListener("click", closeModal);
   el.querySelector("#wb-edit")?.addEventListener("click", () => { closeModal(); editMeeting(date); });
+}
+
+// Homebound sacrament: the standing list lives in settings; who takes it to
+// each member is assigned per Sunday and stored on the meeting (hbAssign map)
+function hbModal(date) {
+  const canEdit = hasRole("bishopric");
+  if (!homebound.length) {
+    toast(canEdit ? "No homebound members yet — add them under ⚙ Settings" : "No homebound members on the list");
+    return;
+  }
+  const cur = meetings[date]?.hbAssign || {};
+  const rows = homebound.map((p) => `
+    <div class="speaker-row" style="align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600">${esc(p.name)}</div>
+        ${p.address ? `<div class="row-sub">${esc(p.address)}</div>` : ""}
+      </div>
+      ${canEdit
+        ? `<input class="hb-who" data-pid="${esc(p.id)}" list="dl-hb-helpers" placeholder="Priests / Teachers / Elders" autocomplete="off" style="flex:1.2" value="${esc(cur[p.id] || "")}">`
+        : `<div style="flex:1.2">${cur[p.id] ? esc(cur[p.id]) : `<span class="row-sub">— not assigned yet</span>`}</div>`}
+    </div>`).join("");
+  const el = openModal(`
+    <h3>Homebound Sacrament <span class="row-sub">· ${fmtDay(date, { year: true })}</span></h3>
+    <p class="row-sub" style="margin:.2rem 0 .7rem">Who takes the sacrament to each homebound member this Sunday.${canEdit ? " The list itself is managed under ⚙ Settings." : ""}</p>
+    ${rows}
+    <datalist id="dl-hb-helpers">${[...new Set([...priests, ...bishopric])].map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+    <div class="modal-actions">
+      <div class="right">
+        <button class="btn" id="hb-cancel">${canEdit ? "Cancel" : "Close"}</button>
+        ${canEdit ? `<button class="btn btn-primary" id="hb-save">Save</button>` : ""}
+      </div>
+    </div>`);
+  el.querySelector("#hb-cancel").addEventListener("click", closeModal);
+  el.querySelector("#hb-save")?.addEventListener("click", async () => {
+    const assign = {};
+    el.querySelectorAll(".hb-who").forEach((i) => {
+      const v = i.value.trim();
+      if (v) assign[i.dataset.pid] = v;
+    });
+    await patchMeeting(date, (mm) => { mm.hbAssign = assign; });
+    closeModal();
+  });
 }
 
 // ===== View modal =====

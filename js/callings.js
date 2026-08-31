@@ -1,29 +1,50 @@
-// Bishopric tab (bishopric+): manage callings in three buckets —
-// callings to fill, members who need callings, and calls in progress.
-import { db } from "./firebase-init.js?v=1788148596";
+// Bishopric tab (bishopric+): the callings flow.
+//   1. Callings to Fill — names under consideration; mark the settled name
+//   2. Call issued & accepted — awaiting sustaining and setting apart
+//   3. Sustained & set apart — waiting on the membership clerk to record it
+//   4. Complete
+// Releases run a parallel flow: decided → notified → released → recorded.
+// Plus a standing pool of members who need callings.
+import { db } from "./firebase-init.js?v=1788148798";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788148596";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788148798";
 
-const STAGES = [
-  ["considering", "Considering"],
-  ["approved", "Approved"],
-  ["extended", "Call extended"],
-  ["accepted", "Accepted"],
-  ["sustained", "Sustained"],
-  ["setapart", "Set apart"],
-  ["declined", "Declined"],
+const CALL_STAGES = [
+  ["fill", "Filling"],
+  ["accepted", "Awaiting sustaining"],
+  ["clerk", "Waiting on clerk"],
+  ["done", "Complete"],
 ];
-const DONE = ["setapart", "declined"];
+const REL_STAGES = [
+  ["decided", "Decided"],
+  ["notified", "Notified"],
+  ["released", "Released"],
+  ["done", "Recorded"],
+];
 
-// one collection, two kinds of docs (keeps everything under the
-// bishopric-only rules): kind "calling" (default) and kind "member"
-// for the members-who-need-callings list
 let items = [];
 let showDone = false;
 let started = false;
+
+// legacy docs from the earlier pipeline get mapped into the new flow
+function norm(d) {
+  if (d.kind === "member" || d.kind === "release") return d;
+  if (d.stage) return { kind: "calling", candidates: [], decided: "", ...d };
+  const s = d.status || "considering";
+  const stage = ["considering", "approved"].includes(s) ? "fill"
+    : ["extended", "accepted"].includes(s) ? "accepted"
+    : s === "sustained" ? "clerk" : "done";
+  return {
+    ...d, kind: "calling", stage,
+    candidates: d.candidate ? [d.candidate] : [],
+    decided: (s !== "considering" && d.candidate) ? d.candidate : "",
+    sustained: ["sustained", "setapart"].includes(s),
+    setApart: s === "setapart",
+  };
+}
 
 export function initCallings() {
   if (started) return;
@@ -33,10 +54,11 @@ export function initCallings() {
     <div class="panel-head">
       <div>
         <h2>Bishopric</h2>
-        <p class="panel-sub">Callings to fill, members who need callings, and calls in progress.</p>
+        <p class="panel-sub">Callings and releases, from consideration to the clerk's records.</p>
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-        <button class="btn" id="btn-new-member">+ Member needing a calling</button>
+        <button class="btn" id="btn-new-member">+ Needs a calling</button>
+        <button class="btn" id="btn-new-release">+ New release</button>
         <button class="btn btn-primary" id="btn-new-calling">+ New calling</button>
       </div>
     </div>
@@ -50,6 +72,7 @@ export function initCallings() {
     </div>`;
 
   panel.querySelector("#btn-new-calling").addEventListener("click", () => editCalling(null));
+  panel.querySelector("#btn-new-release").addEventListener("click", () => editRelease(null));
   panel.querySelector("#btn-new-member").addEventListener("click", () => editMember(null));
   panel.querySelector("#chip-done").addEventListener("click", (e) => {
     showDone = !showDone;
@@ -59,19 +82,62 @@ export function initCallings() {
   });
 
   onSnapshot(query(collection(db, "callings"), orderBy("updatedAt", "desc")), (qs) => {
-    items = qs.docs.map((d) => ({ id: d.id, ...d.data() }));
+    items = qs.docs.map((d) => norm({ id: d.id, ...d.data() }));
     render();
   });
 }
 
-const callingRow = (c) => `
+const save = (id, data) => updateDoc(doc(db, "callings", id), { ...data, updatedAt: serverTimestamp() });
+
+// ---- rows ----
+const fillRow = (c) => {
+  const cands = c.candidates || [];
+  const sub = cands.length
+    ? cands.map((n) => n === c.decided ? `<b>★ ${esc(n)}</b>` : esc(n)).join(" · ")
+    : "No names yet";
+  return `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
       <div class="row-title">${esc(c.calling)}${c.organization ? ` <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.organization)}</span>` : ""}</div>
-      <div class="row-sub">${c.candidate ? esc(c.candidate) : "No candidate yet"}${c.notes ? " · " + esc(c.notes.slice(0, 70)) : ""}</div>
+      <div class="row-sub">${sub}</div>
     </div>
-    ${c.candidate ? `<span class="pill pill-${c.status}">${STAGES.find(([k]) => k === c.status)?.[1] || c.status}</span>` : `<span class="pill pill-overdue">Open</span>`}
+    ${c.decided
+      ? `<span class="pill pill-accepted">Decided</span><button class="btn btn-sm" data-adv="accepted" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
+      : cands.length ? `<span class="pill pill-inprogress">Considering ${cands.length}</span>` : `<span class="pill pill-overdue">Open</span>`}
   </div>`;
+};
+
+const acceptedRow = (c) => `
+  <div class="list-row" data-id="${c.id}">
+    <div class="row-main">
+      <div class="row-title">${esc(c.decided || "—")} <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.calling)}</span></div>
+      <div class="row-sub">Accepted — waiting to be sustained and set apart</div>
+    </div>
+    <button class="chip ${c.sustained ? "active" : ""}" data-tgl="sustained" type="button">Sustained</button>
+    <button class="chip ${c.setApart ? "active" : ""}" data-tgl="setApart" type="button">Set apart</button>
+  </div>`;
+
+const clerkRow = (c) => `
+  <div class="list-row" data-id="${c.id}">
+    <div class="row-main">
+      <div class="row-title">${esc(c.decided || "—")} <span style="color:var(--ink-soft);font-weight:400">· ${esc(c.calling)}</span></div>
+      <div class="row-sub">Sustained &amp; set apart — waiting for the clerk to record it</div>
+    </div>
+    <button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>
+  </div>`;
+
+const releaseRow = (r) => {
+  const next = { decided: ["notified", "Notified →"], notified: ["released", "Released →"], released: ["done", "Clerk updated ✓"] }[r.stage];
+  return `
+  <div class="list-row" data-id="${r.id}">
+    <div class="row-main">
+      <div class="row-title">${esc(r.name)}${r.calling ? ` <span style="color:var(--ink-soft);font-weight:400">· ${esc(r.calling)}</span>` : ""}</div>
+      <div class="row-sub">${r.notes ? esc(r.notes.slice(0, 70)) : "Release"}</div>
+    </div>
+    <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}">${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>
+    ${next ? `<button class="btn btn-sm" data-adv="${next[0]}" type="button">${next[1]}</button>` : ""}
+  </div>`;
+};
 
 const memberRow = (p) => `
   <div class="list-row" data-id="${p.id}">
@@ -82,14 +148,21 @@ const memberRow = (p) => `
     <span class="pill pill-inprogress">Needs calling</span>
   </div>`;
 
+const doneRow = (it) => `
+  <div class="list-row" data-id="${it.id}">
+    <div class="row-main">
+      <div class="row-title">${it.kind === "release" ? `${esc(it.name)} — released` : `${esc(it.decided || "")} — ${esc(it.calling)}`}</div>
+    </div>
+    <span class="pill pill-done">Complete</span>
+  </div>`;
+
 function render() {
   const wrap = document.getElementById("bishopric-buckets");
   if (!wrap) return;
   const callings = items.filter((i) => (i.kind || "calling") === "calling");
+  const releases = items.filter((i) => i.kind === "release");
   const members = items.filter((i) => i.kind === "member");
-  const toFill = callings.filter((c) => !DONE.includes(c.status) && !c.candidate);
-  const inProgress = callings.filter((c) => !DONE.includes(c.status) && c.candidate);
-  const done = callings.filter((c) => DONE.includes(c.status));
+  const by = (st) => callings.filter((c) => c.stage === st);
 
   const bucket = (title, sub, rows, empty) => `
     <div class="card" style="margin-top:.8rem">
@@ -99,28 +172,59 @@ function render() {
     </div>`;
 
   wrap.innerHTML =
-    bucket("Callings to Fill", "Open positions with no candidate yet.",
-      toFill.map(callingRow), "Nothing waiting to be filled.") +
-    bucket("Members who need callings", "Keep them in mind as positions open up.",
-      members.map(memberRow), "No one on the list.") +
-    bucket("In Progress", "Candidates moving through consideration to setting apart.",
-      inProgress.map(callingRow), "No calls in progress.");
+    bucket("Callings to Fill", "Names under consideration — ★ marks the one the bishopric settled on.",
+      by("fill").map(fillRow), "Nothing waiting to be filled.") +
+    bucket("Awaiting Sustaining & Setting Apart", "Call issued and accepted. Tick each step as it happens.",
+      by("accepted").map(acceptedRow), "No accepted calls waiting.") +
+    bucket("Waiting on Membership Clerk", "Done at church — waiting to be recorded in the Church system.",
+      by("clerk").map(clerkRow), "Nothing waiting on the clerk.") +
+    bucket("Releases", "Decided → notified → released → recorded by the clerk.",
+      releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.") +
+    bucket("Members who need callings", "The pool to draw from as positions open up.",
+      members.map(memberRow), "No one on the list.");
 
+  const doneItems = [...callings.filter((c) => c.stage === "done"), ...releases.filter((r) => r.stage === "done")];
   const doneList = document.getElementById("calling-done");
-  if (doneList) doneList.innerHTML = done.length ? done.map(callingRow).join("") : `<div class="empty-note">None completed yet.</div>`;
+  if (doneList) doneList.innerHTML = doneItems.length ? doneItems.map(doneRow).join("") : `<div class="empty-note">None completed yet.</div>`;
 
-  document.querySelectorAll("#panel-callings .list-row").forEach((row) =>
-    row.addEventListener("click", () => {
-      const it = items.find((x) => x.id === row.dataset.id);
-      if (!it) return;
-      if (it.kind === "member") editMember(it);
-      else editCalling(it);
-    }));
+  document.querySelectorAll("#panel-callings .list-row").forEach((row) => {
+    const it = () => items.find((x) => x.id === row.dataset.id);
+    row.addEventListener("click", (e) => {
+      const t = e.target;
+      const item = it();
+      if (!item) return;
+      if (t.dataset.adv) { // quick advance to the named stage
+        e.stopPropagation();
+        save(item.id, { stage: t.dataset.adv });
+        return;
+      }
+      if (t.dataset.tgl) { // sustained / set-apart chips; both on → clerk stage
+        e.stopPropagation();
+        const upd = { [t.dataset.tgl]: !item[t.dataset.tgl] };
+        const s = t.dataset.tgl === "sustained" ? upd.sustained : item.sustained;
+        const a = t.dataset.tgl === "setApart" ? upd.setApart : item.setApart;
+        if (s && a) upd.stage = "clerk";
+        save(item.id, upd);
+        return;
+      }
+      if (item.kind === "member") editMember(item);
+      else if (item.kind === "release") editRelease(item);
+      else editCalling(item);
+    });
+  });
 }
 
+// ---- editors ----
 function editCalling(c) {
   const isNew = !c;
   const needy = items.filter((i) => i.kind === "member");
+  const cands = (c?.candidates || []).length ? [...c.candidates] : [""];
+  const candRow = (n) => `
+    <div class="speaker-row cand-row">
+      <button class="btn btn-sm cand-star${n && n === c?.decided ? " cand-decided" : ""}" type="button" title="Mark as the name the bishopric settled on">★</button>
+      <input class="cand-name" list="dl-needy" autocomplete="off" placeholder="Name" value="${esc(n)}">
+      <button class="btn btn-sm cand-del" type="button" title="Remove this name">✕</button>
+    </div>`;
   const el = openModal(`
     <h3>${isNew ? "New calling" : "Edit calling"}</h3>
     <div class="form-grid two-col">
@@ -130,18 +234,16 @@ function editCalling(c) {
       <label class="field">Organization
         <input id="cl-org" placeholder="e.g. Primary" value="${esc(c?.organization || "")}">
       </label>
-      <label class="field">Candidate
-        <input id="cl-candidate" list="dl-needy" autocomplete="off" value="${esc(c?.candidate || "")}">
-      </label>
-      <label class="field">Stage
-        <select id="cl-status">
-          ${STAGES.map(([k, l]) => `<option value="${k}" ${(c?.status || "considering") === k ? "selected" : ""}>${l}</option>`).join("")}
-        </select>
-      </label>
-      <label class="field full">Notes
-        <textarea id="cl-notes">${esc(c?.notes || "")}</textarea>
-      </label>
     </div>
+    <div class="row-sub" style="margin:.8rem 0 .3rem;font-weight:700">Names being considered <span style="font-weight:400">· ★ = settled on</span></div>
+    <div id="cand-rows">${cands.map(candRow).join("")}</div>
+    <button class="btn btn-sm" id="cand-add" type="button">+ Add a name</button>
+    <label class="field" style="margin-top:.8rem">Stage
+      <select id="cl-stage">${CALL_STAGES.map(([k, l]) => `<option value="${k}" ${(c?.stage || "fill") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    </label>
+    <label class="field" style="margin-top:.6rem">Notes
+      <textarea id="cl-notes">${esc(c?.notes || "")}</textarea>
+    </label>
     <datalist id="dl-needy">${needy.map((p) => `<option value="${esc(p.name)}"></option>`).join("")}</datalist>
     <div class="modal-actions">
       ${!isNew ? `<button class="btn btn-ghost btn-danger" id="cl-delete">Delete</button>` : ""}
@@ -150,6 +252,18 @@ function editCalling(c) {
         <button class="btn btn-primary" id="cl-save">Save</button>
       </div>
     </div>`);
+  el.addEventListener("click", (e) => {
+    if (e.target.id === "cand-add") {
+      el.querySelector("#cand-rows").insertAdjacentHTML("beforeend", candRow(""));
+      el.querySelector("#cand-rows .cand-row:last-child .cand-name")?.focus();
+    }
+    if (e.target.classList.contains("cand-del")) e.target.closest(".cand-row").remove();
+    if (e.target.classList.contains("cand-star")) {
+      const was = e.target.classList.contains("cand-decided");
+      el.querySelectorAll(".cand-star").forEach((s) => s.classList.remove("cand-decided"));
+      if (!was) e.target.classList.add("cand-decided"); // click again to un-decide
+    }
+  });
   el.querySelector("#cl-cancel").addEventListener("click", closeModal);
   el.querySelector("#cl-delete")?.addEventListener("click", async () => {
     if (!confirm("Delete this calling?")) return;
@@ -159,26 +273,81 @@ function editCalling(c) {
   el.querySelector("#cl-save").addEventListener("click", async () => {
     const calling = el.querySelector("#cl-calling").value.trim();
     if (!calling) { toast("Calling needs a name"); return; }
+    const rows = [...el.querySelectorAll(".cand-row")];
+    const candidates = rows.map((r) => r.querySelector(".cand-name").value.trim()).filter(Boolean);
+    const starRow = rows.find((r) => r.querySelector(".cand-star").classList.contains("cand-decided"));
+    const decided = starRow ? starRow.querySelector(".cand-name").value.trim() : "";
     const data = {
+      kind: "calling",
       calling,
       organization: el.querySelector("#cl-org").value.trim(),
-      candidate: el.querySelector("#cl-candidate").value.trim(),
-      status: el.querySelector("#cl-status").value,
+      candidates,
+      decided,
+      stage: el.querySelector("#cl-stage").value,
+      sustained: c?.sustained || false,
+      setApart: c?.setApart || false,
       notes: el.querySelector("#cl-notes").value.trim(),
       updatedAt: serverTimestamp(),
     };
     try {
       if (isNew) await addDoc(collection(db, "callings"), { ...data, createdAt: serverTimestamp() });
       else await updateDoc(doc(db, "callings", c.id), data);
-      // a candidate picked from the needs-a-calling list comes off that list
-      const matched = data.candidate && needy.find((p) => p.name.toLowerCase() === data.candidate.toLowerCase());
-      if (matched && confirm(`Remove ${matched.name} from the "needs a calling" list?`)) {
+      const matched = decided && needy.find((p) => p.name.toLowerCase() === decided.toLowerCase());
+      if (matched && data.stage !== "fill" && confirm(`Remove ${matched.name} from the "needs a calling" pool?`)) {
         await deleteDoc(doc(db, "callings", matched.id));
       }
       closeModal(); toast("Saved");
-    } catch (err) {
-      toast("Couldn't save: " + (err.code || err.message));
-    }
+    } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
+  });
+}
+
+function editRelease(r) {
+  const isNew = !r;
+  const el = openModal(`
+    <h3>${isNew ? "New release" : "Edit release"}</h3>
+    <div class="form-grid two-col">
+      <label class="field">Member
+        <input id="rl-name" value="${esc(r?.name || "")}">
+      </label>
+      <label class="field">Current calling
+        <input id="rl-calling" placeholder="What they're being released from" value="${esc(r?.calling || "")}">
+      </label>
+      <label class="field">Stage
+        <select id="rl-stage">${REL_STAGES.map(([k, l]) => `<option value="${k}" ${(r?.stage || "decided") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      </label>
+      <label class="field full">Notes
+        <textarea id="rl-notes">${esc(r?.notes || "")}</textarea>
+      </label>
+    </div>
+    <div class="modal-actions">
+      ${!isNew ? `<button class="btn btn-ghost btn-danger" id="rl-delete">Delete</button>` : ""}
+      <div class="right">
+        <button class="btn" id="rl-cancel">Cancel</button>
+        <button class="btn btn-primary" id="rl-save">Save</button>
+      </div>
+    </div>`);
+  el.querySelector("#rl-cancel").addEventListener("click", closeModal);
+  el.querySelector("#rl-delete")?.addEventListener("click", async () => {
+    if (!confirm("Delete this release?")) return;
+    await deleteDoc(doc(db, "callings", r.id));
+    closeModal(); toast("Deleted");
+  });
+  el.querySelector("#rl-save").addEventListener("click", async () => {
+    const name = el.querySelector("#rl-name").value.trim();
+    if (!name) { toast("Member name is required"); return; }
+    const data = {
+      kind: "release",
+      name,
+      calling: el.querySelector("#rl-calling").value.trim(),
+      stage: el.querySelector("#rl-stage").value,
+      notes: el.querySelector("#rl-notes").value.trim(),
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      if (isNew) await addDoc(collection(db, "callings"), { ...data, createdAt: serverTimestamp() });
+      else await updateDoc(doc(db, "callings", r.id), data);
+      closeModal(); toast("Saved");
+    } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
 }
 
@@ -217,8 +386,6 @@ function editMember(p) {
       if (isNew) await addDoc(collection(db, "callings"), { ...data, createdAt: serverTimestamp() });
       else await updateDoc(doc(db, "callings", p.id), data);
       closeModal(); toast("Saved");
-    } catch (err) {
-      toast("Couldn't save: " + (err.code || err.message));
-    }
+    } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });
 }

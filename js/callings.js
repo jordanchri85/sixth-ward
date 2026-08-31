@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788150434";
+import { db } from "./firebase-init.js?v=1788150507";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150434";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150507";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -132,7 +132,7 @@ const fillRow = (c) => {
       <div class="row-sub">${sub}</div>
     </div>
     ${c.decided
-      ? `<span class="pill pill-accepted">Decided</span><button class="btn btn-sm" data-adv="called" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
+      ? `<span class="pill pill-accepted" data-undecide="1" style="cursor:pointer" title="Click to change back to considering">Decided</span><button class="btn btn-sm" data-adv="called" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
       : cands.length ? `<span class="pill pill-inprogress">Considering ${cands.length}</span>` : `<span class="pill pill-overdue">Open</span>`}
   </div>`;
 };
@@ -169,6 +169,7 @@ const setApartRow = (c) => `
 
 const releaseRow = (r) => {
   const next = { decided: ["notified", "Notified →"], notified: ["released", "Released →"], released: ["done", "Clerk updated ✓"] }[r.stage];
+  const back = { notified: "decided", released: "notified" }[r.stage];
   return `
   <div class="list-row call-card" data-id="${r.id}" ${cardStyle(r.calling || r.name)}>
     <div class="row-main">
@@ -176,7 +177,7 @@ const releaseRow = (r) => {
       <div class="row-title">${esc(r.name)}</div>
       <div class="row-sub">${r.notes ? esc(r.notes.slice(0, 70)) : "Release"}</div>
     </div>
-    <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}">${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>
+    <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}"${back ? ` data-adv="${back}" style="cursor:pointer" title="Click to go back a step"` : ""}>${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>
     ${next ? `<button class="btn btn-sm" data-adv="${next[0]}" type="button">${next[1]}</button>` : ""}
   </div>`;
 };
@@ -241,7 +242,12 @@ function render() {
       const t = e.target;
       const item = it();
       if (!item) return;
-      if (t.dataset.adv) { // quick advance to the named stage
+      if (t.dataset.undecide) { // "Decided" pill → back to considering
+        e.stopPropagation();
+        save(item.id, { decided: "" });
+        return;
+      }
+      if (t.dataset.adv) { // quick advance / step back to the named stage
         e.stopPropagation();
         save(item.id, { stage: t.dataset.adv });
         return;

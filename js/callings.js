@@ -5,17 +5,18 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788149899";
+import { db } from "./firebase-init.js?v=1788150023";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788149899";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150023";
 
 const CALL_STAGES = [
-  ["fill", "Filling"],
-  ["accepted", "Awaiting sustaining"],
-  ["clerk", "Waiting on clerk"],
+  ["fill", "Calling to Fill"],
+  ["called", "Called"],
+  ["sustained", "Sustained"],
+  ["setapart", "Set Apart"],
   ["done", "Complete"],
 ];
 const REL_STAGES = [
@@ -32,17 +33,22 @@ let started = false;
 // legacy docs from the earlier pipeline get mapped into the new flow
 function norm(d) {
   if (d.kind === "member" || d.kind === "release") return d;
-  if (d.stage) return { kind: "calling", candidates: [], decided: "", ...d };
+  if (d.stage) {
+    // older stage names fold into the four-bucket flow
+    let stage = d.stage;
+    if (stage === "accepted") stage = d.setApart ? "setapart" : d.sustained ? "sustained" : "called";
+    else if (stage === "clerk") stage = "setapart";
+    return { kind: "calling", candidates: [], decided: "", ...d, stage };
+  }
   const s = d.status || "considering";
   const stage = ["considering", "approved"].includes(s) ? "fill"
-    : ["extended", "accepted"].includes(s) ? "accepted"
-    : s === "sustained" ? "clerk" : "done";
+    : ["extended", "accepted"].includes(s) ? "called"
+    : s === "sustained" ? "sustained"
+    : s === "setapart" ? "setapart" : "done";
   return {
     ...d, kind: "calling", stage,
     candidates: d.candidate ? [d.candidate] : [],
     decided: (s !== "considering" && d.candidate) ? d.candidate : "",
-    sustained: ["sustained", "setapart"].includes(s),
-    setApart: s === "setapart",
   };
 }
 
@@ -121,27 +127,34 @@ const fillRow = (c) => {
       <div class="row-sub">${sub}</div>
     </div>
     ${c.decided
-      ? `<span class="pill pill-accepted">Decided</span><button class="btn btn-sm" data-adv="accepted" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
+      ? `<span class="pill pill-accepted">Decided</span><button class="btn btn-sm" data-adv="called" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
       : cands.length ? `<span class="pill pill-inprogress">Considering ${cands.length}</span>` : `<span class="pill pill-overdue">Open</span>`}
   </div>`;
 };
 
-const acceptedRow = (c) => `
+const calledRow = (c) => `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
       <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
-      <div class="row-sub">Accepted — waiting to be sustained and set apart</div>
+      <div class="row-sub">Call accepted — awaiting sustaining</div>
     </div>
-    <button class="chip ${c.sustained ? "active" : ""}" data-tgl="sustained" type="button">Sustained</button>
-    <button class="chip ${c.setApart ? "active" : ""}" data-tgl="setApart" type="button">Set apart</button>
-    <button class="btn btn-sm" data-advfull="1" type="button" title="Mark sustained &amp; set apart and send to the clerk column">→</button>
+    <button class="btn btn-sm" data-adv="sustained" type="button">Sustained →</button>
   </div>`;
 
-const clerkRow = (c) => `
+const sustainedRow = (c) => `
   <div class="list-row" data-id="${c.id}">
     <div class="row-main">
       <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
-      <div class="row-sub">Sustained &amp; set apart — waiting for the clerk to record it</div>
+      <div class="row-sub">Sustained — awaiting setting apart</div>
+    </div>
+    <button class="btn btn-sm" data-adv="setapart" type="button">Set apart →</button>
+  </div>`;
+
+const setApartRow = (c) => `
+  <div class="list-row" data-id="${c.id}">
+    <div class="row-main">
+      <div class="row-title">${esc(c.decided || "—")} ${callingPill(c.calling, c.organization)}</div>
+      <div class="row-sub">Set apart — waiting for the clerk to record it</div>
     </div>
     <button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>
   </div>`;
@@ -195,12 +208,14 @@ function render() {
   // column or use its arrow button
   wrap.innerHTML =
     `<div class="bishopric-board">` +
-    bucket("Callings to Fill", "Names under consideration — ★ marks the settled name.",
+    bucket("Calling to Fill", "Names under consideration — ★ marks the settled name.",
       by("fill").map(fillRow), "Nothing waiting to be filled.", "fill", "calling") +
-    bucket("Awaiting Sustaining & Setting Apart", "Call issued and accepted. Tick each step.",
-      by("accepted").map(acceptedRow), "No accepted calls waiting.", "accepted") +
-    bucket("Waiting on Membership Clerk", "Waiting to be recorded in the Church system.",
-      by("clerk").map(clerkRow), "Nothing waiting on the clerk.", "clerk") +
+    bucket("Called", "Call issued and accepted — awaiting sustaining.",
+      by("called").map(calledRow), "No one waiting to be sustained.", "called") +
+    bucket("Sustained", "Sustained in sacrament meeting — awaiting setting apart.",
+      by("sustained").map(sustainedRow), "No one waiting to be set apart.", "sustained") +
+    bucket("Set Apart", "Done — waiting for the clerk to record it.",
+      by("setapart").map(setApartRow), "Nothing waiting on the clerk.", "setapart") +
     `</div>` +
     bucket("Releases", "Decided → notified → released → recorded by the clerk.",
       releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.", null, "release") +
@@ -222,20 +237,7 @@ function render() {
         save(item.id, { stage: t.dataset.adv });
         return;
       }
-      if (t.dataset.advfull) { // arrow: sustained + set apart + on to the clerk
-        e.stopPropagation();
-        save(item.id, { sustained: true, setApart: true, stage: "clerk" });
-        return;
-      }
-      if (t.dataset.tgl) { // sustained / set-apart chips; both on → clerk stage
-        e.stopPropagation();
-        const upd = { [t.dataset.tgl]: !item[t.dataset.tgl] };
-        const s = t.dataset.tgl === "sustained" ? upd.sustained : item.sustained;
-        const a = t.dataset.tgl === "setApart" ? upd.setApart : item.setApart;
-        if (s && a) upd.stage = "clerk";
-        save(item.id, upd);
-        return;
-      }
+
       if (item.kind === "member") editMember(item);
       else if (item.kind === "release") editRelease(item);
       else editCalling(item);
@@ -286,7 +288,6 @@ function render() {
       }
       const upd = { stage: st };
       if (st !== "fill" && !it.decided) upd.decided = (it.candidates || [])[0];
-      if (st === "clerk") { upd.sustained = true; upd.setApart = true; }
       save(it.id, upd);
     });
   });

@@ -1,10 +1,10 @@
 // Calendar tab: month grid of ward meetings and the bishop's schedule.
-import { db } from "./firebase-init.js?v=1788149899";
-import { ctx, hasRole } from "./app.js?v=1788149899";
+import { db } from "./firebase-init.js?v=1788150023";
+import { ctx, hasRole } from "./app.js?v=1788150023";
 import {
   collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, fmtTime, todayISO } from "./ui.js?v=1788149899";
+import { openModal, closeModal, toast, esc, fmtDate, fmtTime, todayISO } from "./ui.js?v=1788150023";
 
 let events = [];
 let viewYear, viewMonth; // 0-based month

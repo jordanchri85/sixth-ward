@@ -463,8 +463,13 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .st .st-head + * { margin-top: auto; }
 .st > :last-child { margin-bottom: auto; }
 
-/* homebound rows: unchecked (at church this week) dims the whole row */
-.hb-row.hb-off > :not(input.hb-need) { opacity: .45; }
+/* homebound rows: click the name to toggle "Not needed"; those rows wash
+   out and sink to the bottom of the list */
+.hb-row .hb-nm { font-weight: 600; cursor: pointer; }
+.hb-row .hb-nm:hover { text-decoration: underline; }
+.hb-row .hb-flag { display: none; font-weight: 500; font-style: italic; font-size: .78rem; color: var(--ink-soft); margin-left: .25rem; }
+.hb-row.hb-off { opacity: .45; }
+.hb-row.hb-off .hb-flag { display: inline; }
 .hb-row input:not([type="checkbox"]) {
   font: inherit; font-size: .88rem;
   border: 1px solid var(--line); border-radius: 8px;

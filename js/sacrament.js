@@ -2,13 +2,13 @@
 // The agenda is an ordered list of items (speakers, hymns, prayers, business…)
 // that can be added, removed, reordered (drag or ▲▼), each with allotted minutes.
 // Two views: cards (with quick status) and a spreadsheet-style table with inline editing.
-import { db } from "./firebase-init.js?v=1788146626";
-import { ctx, hasRole } from "./app.js?v=1788146626";
+import { db } from "./firebase-init.js?v=1788147448";
+import { ctx, hasRole } from "./app.js?v=1788147448";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788146626";
-import { HYMNS } from "./hymns.js?v=1788146626";
+import { openModal, closeModal, toast, esc, fmtDate, todayISO } from "./ui.js?v=1788147448";
+import { HYMNS } from "./hymns.js?v=1788147448";
 
 
 // dates in this tab are always Sundays — no weekday prefix needed
@@ -1507,14 +1507,16 @@ function hbModal(date) {
     const [a, ...rest] = (cur[pid] || "").split(" & ");
     return [a || "", rest.join(" & ")];
   };
-  const rows = homebound.map((p, i) => {
+  // needed members first, "not needed" ones washed out at the bottom
+  const ordered = [...homebound].sort((x, y) => (skip.has(x.id) ? 1 : 0) - (skip.has(y.id) ? 1 : 0));
+  const rows = ordered.map((p) => {
     const [a, b] = pair(p.id);
     const off = skip.has(p.id);
+    const idx = homebound.indexOf(p);
     return `
-    <div class="speaker-row hb-row${off ? " hb-off" : ""}" data-pid="${esc(p.id)}" style="align-items:flex-start">
-      ${canEdit ? `<input type="checkbox" class="hb-need" ${off ? "" : "checked"} title="Uncheck if they'll be at church and don't need a visit" style="margin-top:.35rem">` : ""}
+    <div class="speaker-row hb-row${off ? " hb-off" : ""}" data-pid="${esc(p.id)}" data-idx="${idx}" style="align-items:flex-start">
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600">${esc(p.name)}</div>
+        <div class="hb-nm"${canEdit ? ` title="Click to toggle: not needed this week (they'll be at church)"` : ""}>${esc(p.name)} <span class="hb-flag">Not needed</span></div>
         ${p.address ? `<div class="row-sub">${esc(p.address)}</div>` : ""}
       </div>
       ${canEdit
@@ -1522,15 +1524,15 @@ function hbModal(date) {
              <input class="hb-who1" list="dl-hb-helpers" autocomplete="off" value="${esc(a)}" ${off ? "disabled" : ""}>
              <input class="hb-who2" list="dl-hb-helpers" autocomplete="off" value="${esc(b)}" ${off ? "disabled" : ""}>
            </div>
-           ${i > 0 ? `<button class="btn btn-sm hb-copy" type="button" title="Copy the assignment from the row above">⧉</button>` : `<button class="btn btn-sm hb-all" type="button" title="Apply this assignment to every member">↧ all</button>`}`
-        : `<div style="flex:1.3">${off ? `<span class="row-sub">at church this week</span>` : cur[p.id] ? esc(cur[p.id]) : `<span class="row-sub">— not assigned yet</span>`}</div>`}
+           ${idx > 0 ? `<button class="btn btn-sm hb-copy" type="button" title="Copy the assignment from the row above">⧉</button>` : `<button class="btn btn-sm hb-all" type="button" title="Apply this assignment to every member">↧ all</button>`}`
+        : `<div style="flex:1.3">${off ? `<span class="row-sub">Not needed this week</span>` : cur[p.id] ? esc(cur[p.id]) : `<span class="row-sub">— not assigned yet</span>`}</div>`}
     </div>`;
   }).join("");
   const el = openModal(`
     <h3>Homebound Sacrament <span class="row-sub">· ${fmtDay(date, { year: true })}</span></h3>
-    <p class="row-sub" style="margin:.2rem 0 .7rem">Who takes the sacrament to each homebound member this Sunday.${canEdit ? " Uncheck anyone who'll be at church. The list itself is managed under ⚙ Settings." : ""}</p>
-    ${canEdit ? `<div style="display:flex;gap:.75rem"><span style="flex:1"></span><span class="row-sub" style="flex:1.3;font-weight:700">Assigned Brethren</span><span style="width:2.6rem"></span></div>` : ""}
-    ${rows}
+    <p class="row-sub" style="margin:.2rem 0 .7rem">Who takes the sacrament to each homebound member this Sunday.${canEdit ? " Click a name to mark them not needed (at church). The list itself is managed under ⚙ Settings." : ""}</p>
+    <div style="display:flex;gap:.75rem;margin-bottom:.2rem"><span class="row-sub" style="flex:1;font-weight:700">Member</span><span class="row-sub" style="flex:1.3;font-weight:700">Assigned Brethren</span>${canEdit ? `<span style="width:2.6rem"></span>` : ""}</div>
+    <div id="hb-list">${rows}</div>
     <datalist id="dl-hb-helpers">${[...new Set([...priests, ...bishopric])].map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
     <div class="modal-actions">
       <div class="right">
@@ -1540,12 +1542,21 @@ function hbModal(date) {
     </div>`);
   el.querySelector("#hb-cancel").addEventListener("click", closeModal);
   if (!canEdit) return;
+  // re-order: needed rows keep their list order, "not needed" rows sink to the bottom
+  const resort = () => {
+    const list = el.querySelector("#hb-list");
+    [...list.querySelectorAll(".hb-row")]
+      .sort((x, y) =>
+        (x.classList.contains("hb-off") ? 1 : 0) - (y.classList.contains("hb-off") ? 1 : 0)
+        || Number(x.dataset.idx) - Number(y.dataset.idx))
+      .forEach((r) => list.appendChild(r));
+  };
   el.addEventListener("click", (e) => {
     const row = e.target.closest(".hb-row");
-    if (e.target.classList.contains("hb-need")) {
-      const on = e.target.checked;
-      row.classList.toggle("hb-off", !on);
-      row.querySelectorAll(".hb-who1,.hb-who2").forEach((inp) => { inp.disabled = !on; });
+    if (e.target.closest(".hb-nm")) {
+      const off = row.classList.toggle("hb-off");
+      row.querySelectorAll(".hb-who1,.hb-who2").forEach((inp) => { inp.disabled = off; });
+      resort();
     }
     if (e.target.classList.contains("hb-copy")) {
       const prev = row.previousElementSibling;
@@ -1567,9 +1578,9 @@ function hbModal(date) {
     const assign = {}, skipped = [];
     el.querySelectorAll(".hb-row").forEach((r) => {
       const pid = r.dataset.pid;
-      if (!r.querySelector(".hb-need").checked) skipped.push(pid);
+      if (r.classList.contains("hb-off")) skipped.push(pid);
       const v = [r.querySelector(".hb-who1").value.trim(), r.querySelector(".hb-who2").value.trim()].filter(Boolean).join(" & ");
-      if (v) assign[pid] = v; // kept even when skipped, so re-checking restores the names
+      if (v) assign[pid] = v; // kept even when not needed, so toggling back restores the names
     });
     await patchMeeting(date, (mm) => { mm.hbAssign = assign; mm.hbSkip = skipped; });
     closeModal();

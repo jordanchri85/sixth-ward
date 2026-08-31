@@ -5,18 +5,18 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788150507";
+import { db } from "./firebase-init.js?v=1788150645";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150507";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150645";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
-  ["called", "Called"],
-  ["sustained", "Sustained"],
-  ["setapart", "Set Apart"],
+  ["issue", "Calls to Issue"],
+  ["sustain", "Calls to Sustain"],
+  ["apart", "Set Apart"],
   ["done", "Complete"],
 ];
 const REL_STAGES = [
@@ -34,21 +34,26 @@ let started = false;
 function norm(d) {
   if (d.kind === "member" || d.kind === "release") return d;
   if (d.stage) {
-    // older stage names fold into the four-bucket flow
+    // older stage names fold into the current flow
     let stage = d.stage;
-    if (stage === "accepted") stage = d.setApart ? "setapart" : d.sustained ? "sustained" : "called";
-    else if (stage === "clerk") stage = "setapart";
-    return { kind: "calling", candidates: [], decided: "", ...d, stage };
+    let setApart = !!d.setApart;
+    if (stage === "accepted" || stage === "called") stage = "sustain";
+    else if (stage === "sustained") stage = "apart";
+    else if (stage === "clerk" || stage === "setapart") { stage = "apart"; setApart = true; }
+    if (stage === "fill" && d.decided) stage = "issue"; // a decided name moves forward
+    return { kind: "calling", candidates: [], decided: "", ...d, stage, setApart };
   }
   const s = d.status || "considering";
-  const stage = ["considering", "approved"].includes(s) ? "fill"
-    : ["extended", "accepted"].includes(s) ? "called"
-    : s === "sustained" ? "sustained"
-    : s === "setapart" ? "setapart" : "done";
+  const stage = s === "considering" ? "fill"
+    : s === "approved" ? "issue"
+    : ["extended", "accepted"].includes(s) ? "sustain"
+    : s === "sustained" ? "apart"
+    : s === "setapart" ? "apart" : "done";
   return {
     ...d, kind: "calling", stage,
     candidates: d.candidate ? [d.candidate] : [],
     decided: (s !== "considering" && d.candidate) ? d.candidate : "",
+    setApart: s === "setapart",
   };
 }
 
@@ -131,40 +136,40 @@ const fillRow = (c) => {
       <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}${c.organization ? ` <span class="call-card-org">· ${esc(c.organization)}</span>` : ""}</div>
       <div class="row-sub">${sub}</div>
     </div>
-    ${c.decided
-      ? `<span class="pill pill-accepted" data-undecide="1" style="cursor:pointer" title="Click to change back to considering">Decided</span><button class="btn btn-sm" data-adv="called" title="${esc(c.decided)} accepted the call">Call accepted →</button>`
-      : cands.length ? `<span class="pill pill-inprogress">Considering ${cands.length}</span>` : `<span class="pill pill-overdue">Open</span>`}
   </div>`;
 };
 
-const calledRow = (c) => `
+const issueRow = (c) => `
   <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
       <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
-      <div class="row-title">${esc(c.decided || "—")}</div>
-      <div class="row-sub">Call accepted — awaiting sustaining</div>
+      <div class="row-title">★ ${esc(c.decided || "—")}</div>
+      <div class="row-sub">Decided — issue the call</div>
     </div>
-    <button class="btn btn-sm" data-adv="sustained" type="button">Sustained →</button>
+    <span class="pill pill-accepted" data-undecide="1" style="cursor:pointer" title="Click to move back to considering">Decided</span>
+    <button class="btn btn-sm" data-adv="sustain" type="button" title="${esc(c.decided || "")} accepted the call">Call accepted →</button>
   </div>`;
 
-const sustainedRow = (c) => `
+const sustainRow = (c) => `
   <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
       <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
       <div class="row-title">${esc(c.decided || "—")}</div>
-      <div class="row-sub">Sustained — awaiting setting apart</div>
+      <div class="row-sub">Call accepted — present for sustaining</div>
     </div>
-    <button class="btn btn-sm" data-adv="setapart" type="button">Set apart →</button>
+    <button class="btn btn-sm" data-adv="apart" type="button">Sustained →</button>
   </div>`;
 
-const setApartRow = (c) => `
+const apartRow = (c) => `
   <div class="list-row call-card" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="row-main">
       <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
       <div class="row-title">${esc(c.decided || "—")}</div>
-      <div class="row-sub">Set apart — waiting for the clerk to record it</div>
+      <div class="row-sub">${c.setApart ? "Set apart — waiting for the clerk to record it" : "Sustained — awaiting setting apart"}</div>
     </div>
-    <button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>
+    ${c.setApart
+      ? `<button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>`
+      : `<button class="btn btn-sm" data-setapart="1" type="button">Set apart ✓</button>`}
   </div>`;
 
 const releaseRow = (r) => {
@@ -218,14 +223,14 @@ function render() {
   // column or use its arrow button
   wrap.innerHTML =
     `<div class="bishopric-board">` +
-    bucket("Calling to Fill", "Names under consideration — ★ marks the settled name.",
+    bucket("Calling to Fill", "Names under consideration — star one to decide.",
       by("fill").map(fillRow), "Nothing waiting to be filled.", "fill", "calling") +
-    bucket("Called", "Call issued and accepted — awaiting sustaining.",
-      by("called").map(calledRow), "No one waiting to be sustained.", "called") +
-    bucket("Sustained", "Sustained in sacrament meeting — awaiting setting apart.",
-      by("sustained").map(sustainedRow), "No one waiting to be set apart.", "sustained") +
-    bucket("Set Apart", "Done — waiting for the clerk to record it.",
-      by("setapart").map(setApartRow), "Nothing waiting on the clerk.", "setapart") +
+    bucket("Calls to Issue", "Name decided — extend the call.",
+      by("issue").map(issueRow), "No calls waiting to be issued.", "issue") +
+    bucket("Calls to Sustain", "Accepted — present for sustaining.",
+      by("sustain").map(sustainRow), "No one waiting to be sustained.", "sustain") +
+    bucket("Set Apart", "Set apart, then the clerk records it.",
+      by("apart").map(apartRow), "No one waiting to be set apart.", "apart") +
     `</div>` +
     bucket("Releases", "Decided → notified → released → recorded by the clerk.",
       releases.filter((r) => r.stage !== "done").map(releaseRow), "No releases in progress.", null, "release") +
@@ -244,7 +249,12 @@ function render() {
       if (!item) return;
       if (t.dataset.undecide) { // "Decided" pill → back to considering
         e.stopPropagation();
-        save(item.id, { decided: "" });
+        save(item.id, { decided: "", stage: "fill" });
+        return;
+      }
+      if (t.dataset.setapart) { // set apart done; still waiting on the clerk
+        e.stopPropagation();
+        save(item.id, { setApart: true });
         return;
       }
       if (t.dataset.adv) { // quick advance / step back to the named stage
@@ -302,7 +312,8 @@ function render() {
         return;
       }
       const upd = { stage: st };
-      if (st !== "fill" && !it.decided) upd.decided = (it.candidates || [])[0];
+      if (st === "fill") upd.decided = ""; // dragged back = reconsidering
+      else if (!it.decided) upd.decided = (it.candidates || [])[0];
       save(it.id, upd);
     });
   });
@@ -371,14 +382,16 @@ function editCalling(c) {
     const candidates = rows.map((r) => r.querySelector(".cand-name").value.trim()).filter(Boolean);
     const starRow = rows.find((r) => r.querySelector(".cand-star").classList.contains("cand-decided"));
     const decided = starRow ? starRow.querySelector(".cand-name").value.trim() : "";
+    let stage = el.querySelector("#cl-stage").value;
+    if (stage === "fill" && decided) stage = "issue";   // decided moves it forward
+    if (stage === "issue" && !decided) stage = "fill";  // un-starred moves it back
     const data = {
       kind: "calling",
       calling,
       organization: el.querySelector("#cl-org").value.trim(),
       candidates,
       decided,
-      stage: el.querySelector("#cl-stage").value,
-      sustained: c?.sustained || false,
+      stage,
       setApart: c?.setApart || false,
       notes: el.querySelector("#cl-notes").value.trim(),
       updatedAt: serverTimestamp(),

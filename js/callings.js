@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788151490";
+import { db } from "./firebase-init.js?v=1788151704";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788151490";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788151704";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -98,7 +98,21 @@ export function initCallings() {
   });
 }
 
-const save = (id, data) => updateDoc(doc(db, "callings", id), { ...data, updatedAt: serverTimestamp() });
+// every stage move gets stamped so you can see when it happened
+const save = (id, data) => {
+  const upd = { ...data, updatedAt: serverTimestamp() };
+  if (upd.stage) upd["stamps." + upd.stage] = serverTimestamp();
+  if (upd.setApart === true) upd["stamps.setApartDone"] = serverTimestamp();
+  return updateDoc(doc(db, "callings", id), upd);
+};
+const fmtStamp = (ts) => {
+  const d = ts?.toDate?.() || (ts ? new Date(ts) : null);
+  return d && !isNaN(d) ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+};
+const stampLine = (label, ts) => {
+  const f = fmtStamp(ts);
+  return f ? `<div class="row-sub">${label} ${f}</div>` : "";
+};
 
 // ---- rows ----
 // each calling gets a consistently colored pill so it's easy to single out;
@@ -141,6 +155,7 @@ const issueRow = (c) => `
   <div class="list-row call-card call-card-v" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
     <div class="row-title">${esc(c.decided || "—")}</div>
+    ${stampLine("Decided", c.stamps?.issue)}
     <div class="call-card-actions"><button class="btn btn-sm" data-adv="sustain" type="button" title="${esc(c.decided || "")} accepted the call">Accepted</button></div>
   </div>`;
 
@@ -148,6 +163,7 @@ const sustainRow = (c) => `
   <div class="list-row call-card call-card-v" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
     <div class="row-title">${esc(c.decided || "—")}</div>
+    ${stampLine("Accepted", c.stamps?.sustain)}
     <div class="call-card-actions"><button class="btn btn-sm" data-adv="apart" type="button">Sustained →</button></div>
   </div>`;
 
@@ -155,7 +171,9 @@ const apartRow = (c) => `
   <div class="list-row call-card call-card-v" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
     <div class="row-title">${esc(c.decided || "—")}</div>
-    ${c.setApart ? `<div class="row-sub">Waiting for the clerk to record it</div>` : ""}
+    ${c.setApart
+      ? `${stampLine("Set apart", c.stamps?.setApartDone)}<div class="row-sub">Waiting for the clerk to record it</div>`
+      : stampLine("Sustained", c.stamps?.apart)}
     <div class="call-card-actions">${c.setApart
       ? `<button class="btn btn-sm" data-adv="done" type="button">Clerk updated ✓</button>`
       : `<button class="btn btn-sm" data-setapart="1" type="button">Set apart ✓</button>`}</div>
@@ -170,6 +188,7 @@ const releaseRow = (r) => {
       ${r.calling ? `<div class="call-card-title" style="color:${callColor(r.calling)}">${esc(r.calling)}</div>` : ""}
       <div class="row-title">${esc(r.name)}</div>
       <div class="row-sub">${r.notes ? esc(r.notes.slice(0, 70)) : "Release"}</div>
+      ${stampLine(REL_STAGES.find(([k]) => k === r.stage)?.[1] || "", r.stamps?.[r.stage])}
     </div>
     <span class="pill ${r.stage === "released" ? "pill-accepted" : "pill-inprogress"}"${back ? ` data-adv="${back}" style="cursor:pointer" title="Click to go back a step"` : ""}>${REL_STAGES.find(([k]) => k === r.stage)?.[1] || r.stage}</span>
     ${next ? `<button class="btn btn-sm" data-adv="${next[0]}" type="button">${next[1]}</button>` : ""}
@@ -189,6 +208,7 @@ const doneRow = (it) => `
   <div class="list-row" data-id="${it.id}">
     <div class="row-main">
       <div class="row-title">${it.kind === "release" ? `${esc(it.name)} — released` : `${esc(it.decided || "")} — ${esc(it.calling)}`}</div>
+      ${stampLine("Completed", it.stamps?.done)}
     </div>
     <span class="pill pill-done">Complete</span>
   </div>`;
@@ -393,8 +413,11 @@ function editCalling(c) {
       updatedAt: serverTimestamp(),
     };
     try {
-      if (isNew) await addDoc(collection(db, "callings"), { ...data, createdAt: serverTimestamp() });
-      else await updateDoc(doc(db, "callings", c.id), data);
+      if (isNew) await addDoc(collection(db, "callings"), { ...data, stamps: { [data.stage]: new Date().toISOString() }, createdAt: serverTimestamp() });
+      else {
+        if (data.stage !== c.stage) data["stamps." + data.stage] = serverTimestamp();
+        await updateDoc(doc(db, "callings", c.id), data);
+      }
       const matched = decided && needy.find((p) => p.name.toLowerCase() === decided.toLowerCase());
       if (matched && data.stage !== "fill" && confirm(`Remove ${matched.name} from the "needs a calling" pool?`)) {
         await deleteDoc(doc(db, "callings", matched.id));
@@ -447,8 +470,11 @@ function editRelease(r) {
       updatedAt: serverTimestamp(),
     };
     try {
-      if (isNew) await addDoc(collection(db, "callings"), { ...data, createdAt: serverTimestamp() });
-      else await updateDoc(doc(db, "callings", r.id), data);
+      if (isNew) await addDoc(collection(db, "callings"), { ...data, stamps: { [data.stage]: new Date().toISOString() }, createdAt: serverTimestamp() });
+      else {
+        if (data.stage !== r.stage) data["stamps." + data.stage] = serverTimestamp();
+        await updateDoc(doc(db, "callings", r.id), data);
+      }
       closeModal(); toast("Saved");
     } catch (err) { toast("Couldn't save: " + (err.code || err.message)); }
   });

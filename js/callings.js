@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788151345";
+import { db } from "./firebase-init.js?v=1788151490";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788151345";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788151490";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -128,7 +128,7 @@ const cardStyle = (label, orgKey) => {
 const fillRow = (c) => {
   const cands = c.candidates || [];
   const sub = cands.length
-    ? cands.map((n) => n === c.decided ? `<div><b>★ ${esc(n)}</b></div>` : `<div>${esc(n)}</div>`).join("")
+    ? cands.map((n, i) => `<div class="cand-line">${esc(n)} <span class="cand-x" data-rm="${i}" title="Remove ${esc(n)} from consideration">✕</span></div>`).join("")
     : "No names yet";
   return `
   <div class="list-row call-card call-card-v" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
@@ -141,7 +141,7 @@ const issueRow = (c) => `
   <div class="list-row call-card call-card-v" data-id="${c.id}" ${cardStyle(c.calling, c.organization)}>
     <div class="call-card-title" style="color:${callColor(c.calling, c.organization)}">${esc(c.calling)}</div>
     <div class="row-title">${esc(c.decided || "—")}</div>
-    <div class="call-card-actions"><button class="btn btn-sm" data-adv="sustain" type="button" title="${esc(c.decided || "")} accepted the call">Call accepted →</button></div>
+    <div class="call-card-actions"><button class="btn btn-sm" data-adv="sustain" type="button" title="${esc(c.decided || "")} accepted the call">Accepted</button></div>
   </div>`;
 
 const sustainRow = (c) => `
@@ -236,6 +236,13 @@ function render() {
       const t = e.target;
       const item = it();
       if (!item) return;
+      if (t.dataset.rm != null && t.classList.contains("cand-x")) { // ✕ a considered name
+        e.stopPropagation();
+        const cands = [...(item.candidates || [])];
+        cands.splice(Number(t.dataset.rm), 1);
+        save(item.id, { candidates: cands });
+        return;
+      }
       if (t.dataset.undecide) { // "Decided" pill → back to considering
         e.stopPropagation();
         save(item.id, { decided: "", stage: "fill" });

@@ -489,6 +489,10 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 .call-card-v .row-title { margin-top: .15rem; }
 .call-card-actions { margin-top: .45rem; display: flex; justify-content: flex-end; }
 .call-card-actions .btn { padding: .22rem .6rem; font-size: .78rem; }
+/* candidate lines on fill cards: quiet ✕ to drop a name from consideration */
+.cand-line { display: flex; align-items: center; gap: .35rem; }
+.cand-x { cursor: pointer; color: var(--ink-soft); opacity: .55; font-size: .78rem; padding: 0 .15rem; }
+.cand-x:hover { opacity: 1; color: var(--danger); }
 .call-card-title { font-weight: 700; font-size: .92rem; line-height: 1.25; }
 .call-card-org { font-weight: 500; font-size: .78rem; opacity: .75; }
 .call-card .row-sub { color: var(--ink); opacity: .8; }

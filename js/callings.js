@@ -5,12 +5,12 @@
 //   4. Complete
 // Releases run a parallel flow: decided → notified → released → recorded.
 // Plus a standing pool of members who need callings.
-import { db } from "./firebase-init.js?v=1788150185";
+import { db } from "./firebase-init.js?v=1788150434";
 import {
   collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150185";
+import { openModal, closeModal, toast, esc } from "./ui.js?v=1788150434";
 
 const CALL_STAGES = [
   ["fill", "Calling to Fill"],
@@ -117,7 +117,7 @@ const callColor = (label, orgKey) => {
 // the whole card is one big tinted pill in the calling's color
 const cardStyle = (label, orgKey) => {
   const col = callColor(label, orgKey);
-  return `style="background:${col}1c;border:1px solid ${col}55" data-col="${col}"`;
+  return `style="background:${col}22;border:1px solid ${col}55;border-left:5px solid ${col}" data-col="${col}"`;
 };
 
 const fillRow = (c) => {
